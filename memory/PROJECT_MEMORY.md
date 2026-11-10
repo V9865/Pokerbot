@@ -4,7 +4,7 @@ Read this first in every conversation. Update it at the end of every phase.
 
 ## 1. Status
 - Phase: v1.1 complete, fully tested, and passed all acceptance gates.
-- Current bot: v1.1 = dist\bot.py = snapshots\v1_1_bot.py.
+- Current bot: v1.1 = dist\bot.py = snapshots\v1_1_bot.py (Git commit: b277b76).
 - Uploaded to Unstop: ready to upload v1.1.
 - Benchmarks:
   * Head-to-head vs v1: 28-0-12, +0.44 +- 0.39 chips/hand (Regression gate PASSED).

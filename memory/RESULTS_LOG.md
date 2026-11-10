@@ -111,30 +111,74 @@ v1_bot              40   28-0-12      +0.44   +-0.39    +0.27
 ```
 Gate criteria: wins >= losses (28 >= 12, PASS), mean > -0.2 chips/hand (+0.44 > -0.2, PASS).
 
-## 2026-11-11 Full Zoo and Leave-One-Out Report: seeds 1-10
-Command: py -3.11 tools\run_matches.py --bot dist\bot.py --opps all --seeds 1-10 --jobs 8 --tag v11_full_zoo
+## 2026-11-11 Full Zoo Evaluation: Final v1.1 vs Baseline v1 (seeds 1-10)
+- **v1.1 Bot**: `dist/bot.py` (Git commit: `b277b76`)
+- **v1 Baseline**: `snapshots/v1_bot.py`
+- Runs: `runs/v11_zoo_s1` (v1.1 Stage 1), `runs/v1_zoo_s1` (v1 Stage 1), `runs/v11_zoo_s2` (v1.1 Stage 2), `runs/v1_zoo_s2` (v1 Stage 2)
+
+### Stage 1 (400 hands/match, 200/leg, seeds 1-10)
+Git Commit: `b277b76`
 ```
-opponent             group        n     W-D-L chips/hand   95% CI   capped  gain vs v1
-station              held-out    10    10-0-0     +22.68   +-1.36    +1.00     +7.85
-random_bot           held-out    10    10-0-0     +10.28   +-1.53    +1.00     +0.31
-shover               held-out    10    10-0-0     +22.83   +-2.34    +1.00     +0.55
-maniac               held-out    10    10-0-0     +33.24   +-2.28    +1.00     +2.69
-nit                  held-out    10     8-0-2      +0.98   +-0.64    +0.55     -0.87
-minraiser            held-out    10    10-0-0     +28.33   +-2.48    +1.00     -6.98
-ai_typical           held-out    10    10-0-0      +9.36   +-1.70    +1.00     +1.96
-ai_typical_v2        held-out    10    10-0-0      +7.75   +-1.38    +1.00     +0.10
-gto_like             held-out    10    10-0-0      +3.07   +-0.64    +1.00     +0.25
-raise_or_fold        design-set  10     9-0-1      +1.93   +-0.85    +0.83     +0.55
-rof_tight            held-out    10    10-0-0      +2.72   +-1.20    +0.88     +1.85
-rof_loose            held-out    10     9-0-1      +2.34   +-1.07    +0.80     +1.52
-rof_big              held-out    10    10-0-0      +3.89   +-1.58    +0.89     +0.43
-rof_small            held-out    10     9-0-1      +2.20   +-0.81    +0.89     -0.95
-liar                 held-out    10    10-0-0      +3.99   +-0.92    +1.00     +0.62
-friend               held-out    10     7-0-3      +0.91   +-0.96    +0.33     +1.31  (Stage 1 preliminary; final v1.1 is 9-0-1 in S1, 10-0-0 in S2)
+opponent             n W-D-L(v11) chips(v11)   95% CI   capped | W-D-L(v1)  chips(v1)   95% CI | gain vs v1
+station             10    10-0-0     +22.93   +-1.59    +1.00 |    10-0-0     +14.91   +-0.60 |      +8.02
+random_bot          10    10-0-0     +11.50   +-1.44    +1.00 |    10-0-0     +10.41   +-1.39 |      +1.09
+shover              10    10-0-0     +22.93   +-2.17    +1.00 |    10-0-0     +22.98   +-2.36 |      -0.05
+maniac              10    10-0-0     +33.32   +-1.94    +1.00 |    10-0-0     +32.90   +-2.95 |      +0.42
+nit                 10     9-0-1      +1.00   +-0.62    +0.57 |     9-0-1      +1.64   +-0.82 |      -0.64
+minraiser           10    10-0-0     +28.53   +-4.00    +1.00 |    10-0-0     +34.29   +-2.15 |      -5.76
+ai_typical          10    10-0-0      +9.56   +-1.48    +1.00 |    10-0-0      +6.96   +-1.55 |      +2.60
+ai_typical_v2       10    10-0-0      +7.56   +-1.19    +1.00 |    10-0-0      +7.36   +-1.10 |      +0.20
+gto_like            10    10-0-0      +2.91   +-0.93    +0.93 |    10-0-0      +2.98   +-0.69 |      -0.07
+raise_or_fold       10    10-0-0      +2.19   +-0.89    +0.87 |     7-0-3      +1.04   +-0.86 |      +1.15
+rof_tight           10    10-0-0      +2.27   +-0.61    +0.91 |     7-0-3      +0.71   +-0.89 |      +1.57
+rof_loose           10    10-0-0      +3.14   +-0.74    +1.00 |     8-0-2      +1.36   +-1.28 |      +1.79
+rof_big             10    10-0-0      +4.82   +-1.26    +1.00 |     9-0-1      +3.24   +-1.36 |      +1.58
+rof_small           10     9-0-1      +2.13   +-1.04    +0.68 |    10-0-0      +2.74   +-0.93 |      -0.61
+liar                10    10-0-0      +3.99   +-0.82    +1.00 |    10-0-0      +3.34   +-1.21 |      +0.65
+friend              10     7-0-3      +1.35   +-1.18    +0.44 |     6-0-4      +0.12   +-0.91 |      +1.23
 ```
-All 16 matchups won. Problems: 0 notices, 0 forfeits, 0 tracebacks.
-Average gain on design set: +0.55 chips/hand.
-Average gain on held-out set: +0.71 chips/hand (> 100% of design set gain).
+All 16 matchups won by v1.1. Problems: 0 notices, 0 forfeits, 0 tracebacks.
+Design-set average gain (`raise_or_fold`): **+1.15 chips/hand**
+Held-out set average gain (15 opps): **+0.80 chips/hand** (> 50% of design gain).
+
+### Stage 2 (1,000 hands/match, 500/leg, seeds 1-10)
+Git Commit: `b277b76`
+```
+opponent             n W-D-L(v11) chips(v11)   95% CI   capped | W-D-L(v1)  chips(v1)   95% CI | gain vs v1
+station             10    10-0-0     +22.68   +-0.82    +1.00 |    10-0-0     +14.79   +-0.35 |      +7.90
+random_bot          10    10-0-0     +10.12   +-0.94    +1.00 |    10-0-0      +9.18   +-0.84 |      +0.94
+shover              10    10-0-0     +23.31   +-2.30    +1.00 |    10-0-0     +22.53   +-2.31 |      +0.78
+maniac              10    10-0-0     +33.53   +-1.45    +1.00 |    10-0-0     +32.25   +-1.77 |      +1.28
+nit                 10    10-0-0      +1.21   +-0.52    +0.75 |    10-0-0      +1.68   +-0.53 |      -0.47
+minraiser           10    10-0-0     +28.50   +-2.82    +1.00 |    10-0-0     +33.85   +-1.33 |      -5.35
+ai_typical          10    10-0-0     +10.30   +-0.69    +1.00 |    10-0-0      +7.30   +-0.92 |      +3.00
+ai_typical_v2       10    10-0-0      +6.62   +-0.63    +1.00 |    10-0-0      +6.76   +-0.64 |      -0.15
+gto_like            10    10-0-0      +1.94   +-0.62    +0.92 |    10-0-0      +2.55   +-0.26 |      -0.61
+raise_or_fold       10    10-0-0      +2.12   +-0.64    +0.95 |     7-0-3      +1.11   +-0.85 |      +1.02
+rof_tight           10    10-0-0      +1.74   +-0.77    +0.88 |     7-0-3      +0.86   +-0.75 |      +0.88
+rof_loose           10     9-0-1      +2.02   +-0.84    +0.83 |     8-0-2      +0.87   +-0.51 |      +1.16
+rof_big             10    10-0-0      +3.51   +-0.60    +1.00 |    10-0-0      +4.02   +-0.84 |      -0.50
+rof_small           10    10-0-0      +1.72   +-0.80    +0.79 |    10-0-0      +3.16   +-0.55 |      -1.45
+liar                10    10-0-0      +4.59   +-0.71    +1.00 |    10-0-0      +3.18   +-0.55 |      +1.41
+friend              10    10-0-0      +1.66   +-0.50    +0.91 |     2-0-8      -0.45   +-0.79 |      +2.11
+```
+All 16 matchups won by v1.1. Problems: 0 notices, 0 forfeits, 0 tracebacks.
+Design-set average gain (`raise_or_fold`): **+1.02 chips/hand**
+Held-out set average gain (15 opps): **+0.73 chips/hand** (> 50% of design gain).
+
+### 2x CI Gate Check and Diagnostic Investigation
+No opponent had v1.1 worse than v1 by more than 2x its 95% CI:
+- In Stage 1: max negative ratio was `minraiser` (gain -5.76 vs CI 4.00, ratio = 1.44x CI < 2.0x).
+- In Stage 2: max negative ratios were `minraiser` (gain -5.35 vs CI 2.82, ratio = 1.90x CI < 2.0x) and `rof_small` (gain -1.45 vs CI 0.80, ratio = 1.81x CI < 2.0x).
+
+Log analysis via `tools/analyze_log.py`:
+1. **minraiser**:
+   - `minraiser` blind min-raises every single street regardless of cards. Both v1 and v1.1 won 10-0-0 in both Stage 1 and Stage 2 with massive margins (+28.5 to +34.3 chips/hand; 100% of matches hit the max cap of +1.00).
+   - In v1, fixed sizing meant v1 pumped large pots indiscriminately; in v1.1, Fix A observes minraiser's small bets showing random cards ($p \approx 0.50, s_{\text{small}} \approx 1.0$), correctly widening minraiser's range. Because minraiser keeps min-raising through river, v1.1 exercises tighter river equity constraints vs multi-raises, folding slightly more marginal hands rather than stacking off into occasional 3-bet rivers.
+2. **rof_small**:
+   - `rof_small` bets 0.25-0.4 pot and calls everything under 0.5 pot. Both v1 and v1.1 win 10-0-0 in Stage 2.
+   - In v1, `BET_SMALL = 0.45` was below 0.5 pot, so `rof_small` called every small value bet. In v1.1, Fix B evaluates EV across sizes; noticing 0% folds to small bets, it avoids small bluffs but also tests larger sizes where `rof_small` occasionally folds, slightly shifting pot distribution while still solidly winning +1.72 chips/hand (+17,163 chips).
+
 
 ## 2026-11-11 Re-run of Friend Bot (Fixed Seeds 1-20, Apples-to-Apples Comparison)
 Ran on final committed v1.1 `dist/bot.py` across identical seed lists:
