@@ -9,9 +9,14 @@ Read first: memory, training-method (all), match-testing.
 ## Build tools\train.py
   py -3.11 tools\train.py --stage A|B|C|D [--gens N] [--pop N] [--jobs N]
                           [--hands N] [--resume] [--dry-run]
-- Reads tools\train_config.json: opponents and weights, held-out opponents,
+- Reads tools\train_config.json: opponents and weights (friend removed; rof_tight, rof_loose,
+  rof_big, rof_small, raise_or_fold weight 2 each; snapshots\v1_1_bot.py weight 3),
+  held-out opponents (friend, liar, ai_typical, 2nd exploiter; seeds >= 5000),
   which PARAMS each stage trains (others fixed at current src values),
   sigma0, population, matches per opponent, L2 penalty for stage C.
+- Objective per match: score = 0.6 * tanh(n / 0.25) + 0.4 * clip(n, -1, 1),
+  F = weighted mean of score over opponents. Notice, forfeit or traceback: F = -10.
+- Train on Stage 1 length (200 hands/leg, 400 total) at least half of the time.
 - Uses the `cma` package (`py -3.11 -m pip install cma`) on parameters scaled
   to [0, 1] by BOUNDS.
 - For each candidate: write runs\train\<stage>\cand_<gen>_<i>.json, build a
@@ -44,7 +49,9 @@ gate results.
 3. User: runs them in a PowerShell window, laptop plugged in, sleep disabled.
 4. Next conversation ("Resume from memory", then "evaluate stage A"):
    validate_params on best.json; accept or reject per training-method
-   section 8; if accepted, write PARAMS into src\policy_params.py, rebuild,
+   section 8 (replaces v1.1 only if on held-out seeds: no winning W-D-L becomes losing,
+   capped chips improve on average, and friend Stage 1 AND Stage 2 are no worse than
+   v1.1 within CI); if accepted, write PARAMS into src\policy_params.py, rebuild,
    run fuzz and timing, snapshot vN, commit, append to memory.
 5. Repeat for B, then C and D if time allows. Each stage starts from the
    accepted params of the previous one.

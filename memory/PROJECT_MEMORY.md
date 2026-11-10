@@ -50,6 +50,21 @@ Upload dist\bot.py (v1.1) to Unstop.
     (weight 3 of about 25; overfitting guarded by held-out opponents).
   * laptop: 8+ cores, can train overnight.
   * final upload by 12-13 Nov; stages C and D of training are optional.
+- 2026-11-11 (user): Amendments before Phase 2:
+  * Baseline from now on is snapshots\v1_1_bot.py (commit b277b76), not v1.
+  * Phase 2 Step 0 (friend diagnosis) already complete; skip it. All regression gates vs snapshots\v1_1_bot.py.
+  * New Step 1b (bet-size grid in src\strategy.py, config in config.py):
+    - sizes when not facing a bet: {0.25, 0.33, 0.45, 0.6, 0.75, 1.0, 1.4} pot (1.4 if stack covers; STACK_OFF rule unchanged).
+    - Replace 4 response buckets with per-size counts; our bet counts at nearest grid size; smoothed rate = (counts[b] + 0.5 * neighbor_counts + 8 * prior) / total_weight.
+    - Clamps: fold-rate within +-0.30 of prior until 40 observations at size + neighbors.
+    - Gate: rof_small Stage 2 within CI of v1's +3.16, gto_like Stage 2 no worse than v1.1, full zoo within CI, head-to-head vs v1_1 seeds 1-40 wins >= losses.
+  * Reporting rule: gain CI = sqrt(CI_new^2 + CI_old^2) (or paired CI). Report chips/hand AND capped chips/hand (+-1.00/hand) and W-D-L; judge by W-D-L and capped chips.
+  * Training plan amendments:
+    - Pool (tools\train_config.json): remove friend. Add rof_tight, rof_loose, rof_big, rof_small, raise_or_fold (weight 2 each), snapshots\v1_1_bot.py (weight 3).
+    - Held out for validation only: friend, liar, ai_typical, second exploiter variant, seeds >= 5000. Never report training F on these.
+    - Objective per match: score = 0.6 * tanh(n / 0.25) + 0.4 * clip(n, -1, 1), F = weighted mean. Notice/forfeit/traceback: F = -10.
+    - Train on Stage 1 length (200 hands/leg) >= 50% of the time.
+    - Replacement gate: on held-out seeds, no winning W-D-L becomes losing, capped chips improve on average, friend S1 & S2 no worse within CI.
 
 ## 4. Facts and lessons
 - Diagnosis of 50 Stage-2 matches (50,000 hands) of v1 vs friend's bot:

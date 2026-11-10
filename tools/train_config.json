@@ -1,0 +1,29 @@
+{
+  "training_opponents": {
+    "snapshots/v1_1_bot.py": 3,
+    "rof_tight": 2,
+    "rof_loose": 2,
+    "rof_big": 2,
+    "rof_small": 2,
+    "raise_or_fold": 2,
+    "exploiter": 2,
+    "gto_like": 2,
+    "ai_typical_v2": 2,
+    "station": 1,
+    "random_bot": 1,
+    "shover": 1,
+    "maniac": 1,
+    "nit": 1,
+    "minraiser": 1
+  },
+  "held_out_opponents": [
+    "friend",
+    "liar",
+    "ai_typical",
+    "exploiter_v2"
+  ],
+  "validation_seed_range": [5000, 5039],
+  "objective": "0.6 * tanh(n / 0.25) + 0.4 * clip(n, -1, 1)",
+  "penalty_bad_match": -10.0,
+  "stage_1_ratio": 0.5
+}

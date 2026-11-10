@@ -77,19 +77,33 @@ the bundled file (variants for training; never for dist\bot.py).
 Opponents and weights (keep in tools\train_config.json):
 | Opponent | Weight | Why |
 | --- | --- | --- |
-| friend | 3 | a real entry that beat v1 |
-| snapshots\v1_bot.py | 2 | must keep beating our own baseline |
+| snapshots\v1_1_bot.py | 3 | must keep beating our own v1.1 baseline |
+| rof_tight | 2 | variant with tight button raises |
+| rof_loose | 2 | variant with loose button raises |
+| rof_big | 2 | variant with large bet sizing |
+| rof_small | 2 | variant with small bet sizing and wide calling |
+| raise_or_fold | 2 | baseline stand-in raise-or-fold opponent |
 | current best (frozen at the start of each stage) | 2 | self-play pressure |
 | exploiter | 2 | an adaptive bot that attacks our patterns |
 | gto_like, ai_typical_v2 | 2 each | the two main families in the field |
-| station, random_bot, shover, maniac, nit, minraiser, ai_typical | 1 each | weak bots must still be crushed |
-Hold out from training (validation only): opponents\ai_typical.py and a second
-exploiter variant (exploiter with different parameters), plus all seeds >= 5000.
+| station, random_bot, shover, maniac, nit, minraiser | 1 each | weak bots must still be crushed |
 
-Objective per candidate (maximise):
-  F = sum_o w_o * mean over matches of tanh(net_chips_per_hand / 3) / sum_o w_o
-tanh rewards winning each match and stops huge wins against weak bots from
-dominating. Any notice, forfeit or traceback sets F = -10 for the candidate.
+Friend is removed from the training pool.
+Hold out from training (validation only): opponents\friend.py, opponents\liar.py,
+opponents\ai_typical.py, a second exploiter variant (exploiter with different
+parameters), and all seeds >= 5000. Never report training F on these.
+
+Objective per match:
+  score = 0.6 * tanh(n / 0.25) + 0.4 * clip(n, -1, 1)
+where n = net chips per hand of that match. F = weighted mean of score over opponents:
+  F = sum_o w_o * mean over matches of score / sum_o w_o
+Why: matches are ranked by win/loss, then by chips capped at +1/hand, so winning
+by +20 is worth no more than winning by +1. Any notice, forfeit or traceback
+sets F = -10 for the candidate.
+
+Stage length: train on Stage 1 length (200 hands/leg, 400 total) at least half
+of the time, alternating or mixed with Stage 2 length (500 hands/leg, 1,000 total):
+Stage 1 is where v1.1 is weakest because its learning has fewer hands to observe.
 
 ## 6. Optimiser: CMA-ES
 - Tools only: `py -3.11 -m pip install cma` (allowed: tools are not the bot).
@@ -118,17 +132,20 @@ Stages C and D are optional if time runs out.
 
 ## 8. Accepting a stage
 After each stage, validate the stage's best params (built with --params):
-- held-out seeds 5000-5039 against: the previous snapshot, v1, friend,
-  gto_like, ai_typical_v2, the held-out ai_typical and the second exploiter
-- accept only if: head-to-head vs the previous snapshot is positive beyond
-  its CI or at least not worse with a clear gain against friend; no opponent
-  worse than the previous snapshot beyond 2x CI; safety and timing gates pass
+- held-out seeds 5000-5039 against: the previous snapshot, snapshots\v1_1_bot.py, friend,
+  gto_like, ai_typical_v2, the held-out ai_typical, liar, and the second exploiter.
+- A trained policy replaces v1.1 only if, on held-out seeds:
+  1. No matchup goes from a winning W-D-L to a losing one.
+  2. Capped chips (+-1.00/hand) improve on average across opponents.
+  3. friend Stage 1 AND Stage 2 are no worse than v1.1 within CI.
+  4. Head-to-head vs the previous snapshot is positive beyond its CI or at least not worse.
+  5. Safety and timing gates pass (reply < 250 ms, think time < 20% of bank, 0 errors/notices).
 - accepted -> write the params into src\policy_params.py, rebuild, snapshot
   vN, commit. Rejected -> keep the previous params; record why in memory.
 
 ## 9. Pitfalls
-- Overfitting to the friend's bot: its weight is 3 of about 25; validation
-  includes held-out opponents. If the friend's result improves while held-out
+- Overfitting: friend, liar, ai_typical and the second exploiter are strictly held out.
+  If the training population improves while held-out opponents degrade, reject.
   opponents get worse, reject.
 - Noise: never compare candidates on different seeds; never accept a stage on
   fewer than 40 validation seeds per opponent.
