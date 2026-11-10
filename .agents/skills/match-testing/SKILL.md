@@ -17,11 +17,14 @@ description: How to measure the Discard Hold'em bot - the test opponents (zoo) i
 | ai_typical_v2.py | same family with value raises, call margins, flop bluffs, simulated discard | a stronger AI-written design |
 | gto_like.py | wide opens, minimum defence frequency, polarised bets with a fixed bluff ratio, two sizes, mixing, equity-max discard | "GTO + discard" bots |
 | recorder.py | logs requests; used by tools\test_history.py | (test helper) |
+| friend.py | the friend's bot | external competitor |
+| exploiter.py | adaptive bot attacking our patterns | robustness test |
+| exploiter2.py | second exploit variant | robustness test |
 | snapshots\vN_bot.py | our earlier versions | regression; the strongest opponent we have |
 The zoo is OUR guess at the field. Winning against it is necessary, not
-sufficient. The head-to-head result against our previous snapshot is the main
-measure of real progress. Phase 3 adds opponents\exploiter.py (an adaptive bot
-that attacks our patterns) to test robustness.
+sufficient. Head-to-head against the previous snapshot and the result against
+friend are the two main measures of progress. Phase 3 adds opponents\exploiter.py
+(an adaptive bot that attacks our patterns) to test robustness.
 
 ## 2. Harness
   py -3.11 tools\run_matches.py --opps all --seeds 1-10 --tag NAME

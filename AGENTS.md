@@ -37,15 +37,17 @@ on this machine and then make it stronger, phase by phase, WITHOUT ever breaking
    (Rulebook 10.1). Published algorithms are fine.
 9. Never edit `dist\bot.py` by hand; it is built by `tools\bundle.py`.
 10. Never weaken a test, a gate or a hard rule to make a change pass.
+11. Never upload a variant built with --set or --params. Only dist\bot.py built from src\ after a stage is accepted.
 
 ## Working rules
 - Run Python as `py -3.11`. Run commands from the workspace root.
 - Before working on an area read its skill: rules -> `discard-holdem-rules`;
   decisions -> `poker-strategy`; protocol, timing, bundling -> `bot-safety`;
   tests and acceptance -> `match-testing`.
-- Phases are skills: `phase-0-verify`, `phase-1-harden`, `phase-2-ranges`,
-  `phase-3-exploits`, `phase-4-tune`, `phase-5-submit`. Do one phase per
-  conversation, in order, and stop at its checkpoint.
+- Phases are skills: phase-0-verify, phase-1-harden, phase-2-features,
+  phase-3-policy, phase-4-train, phase-5-submit. Do one phase per
+  conversation, in order, and stop at its checkpoint. The trained policy is
+  described in the skill training-method.
 - Every tunable number lives in `src\config.py` with a one-line comment.
 - After ANY change in `src\`: `py -3.11 tools\bundle.py`, then
   `py -3.11 tools\fuzz_protocol.py`, then a smoke batch

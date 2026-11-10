@@ -9,9 +9,10 @@ Read this first in every conversation. Update it at the end of every phase.
 - Uploaded to Unstop: nothing yet (v1 ready for upload).
 - Verified on Windows (Python 3.11.18, numpy 1.26.4, scipy 1.17.1, 20 logical cores).
   All test tools, bundle, fuzz, timing reports, and match runs passed with zero errors/notices/forfeits.
+- v1 lost heavily to the user's friend's bot (11 Nov, no log kept).
 
 ## 2. Next step
-Upload dist\bot.py (v1) to Unstop, then run the skill phase-1-harden.
+Upload dist\bot.py (v1) to Unstop, then run phase-2-features Step 0 (friend's bot diagnosis).
 
 ## 3. Decisions
 - 2026-11-10 (user): Windows laptop; build phase by phase; playing style
@@ -29,6 +30,15 @@ Upload dist\bot.py (v1) to Unstop, then run the skill phase-1-harden.
   for model error only.
 - 2026-11-10: the test zoo is our own guess at the field; head-to-head against
   our previous snapshot is the main measure of progress.
+- 2026-11-10 (user):
+  * hybrid plan: keep the safety shell and the math core; replace the
+    if/else decision layer with a trained, EV-structured policy
+    (training-method skill). No full rebuild (solver or deep RL rejected
+    as too risky before the deadline).
+  * the friend's bot is available and becomes a training and test opponent
+    (weight 3 of about 25; overfitting guarded by held-out opponents).
+  * laptop: 8+ cores, can train overnight.
+  * final upload by 12-13 Nov; stages C and D of training are optional.
 
 ## 4. Facts and lessons
 - Preflop equities are compressed: best hand 0.794, top 10% 0.596, median
