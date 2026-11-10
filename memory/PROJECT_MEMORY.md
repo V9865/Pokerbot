@@ -3,15 +3,15 @@
 Read this first in every conversation. Update it at the end of every phase.
 
 ## 1. Status
-- Phase: kit delivered; Phase 0 (verify on this machine) not yet run.
+- Phase: Phase 0 (verify on this machine) complete and passed.
 - Current bot: v1 = dist\bot.py = snapshots\v1_bot.py (snapshots\v0_bot.py is the
   same bot without the fold-rate exploits).
-- Uploaded to Unstop: nothing yet.
-- v1 was built and tested on Linux, Python 3.11.18, numpy 2.4.6, 2 cores.
-  It has NOT yet been run on this Windows machine.
+- Uploaded to Unstop: nothing yet (v1 ready for upload).
+- Verified on Windows (Python 3.11.18, numpy 1.26.4, scipy 1.17.1, 20 logical cores).
+  All test tools, bundle, fuzz, timing reports, and match runs passed with zero errors/notices/forfeits.
 
 ## 2. Next step
-Run the skill phase-0-verify. If everything passes, the user uploads dist\bot.py.
+Upload dist\bot.py (v1) to Unstop, then run the skill phase-1-harden.
 
 ## 3. Decisions
 - 2026-11-10 (user): Windows laptop; build phase by phase; playing style
@@ -40,7 +40,10 @@ Run the skill phase-0-verify. If everything passes, the user uploads dist\bot.py
 - eval_batch is about 0.4 us per hand; turn equity exact in about 10 ms; river
   0.3 ms; flop 1,500 samples in about 4-5 ms.
 - v1 thinking time: about 2 s per 200-hand leg and 5 s per 500-hand leg
-  (about 7% of the bank); max reply about 23 ms.
+  (about 7% of the bank); max reply about 23 ms on Linux reference machine.
+  On this Windows machine (20 cores, Python 3.11.18): Stage 1 think time 2.7-3.2 s
+  per leg (9-11% of bank), max reply ~30 ms; Stage 2 think time 7.6-9.3 s per leg
+  (10-12% of bank), max reply ~35.5 ms. All requests ran in mode FULL.
 - The local engine prints "time used 0.00 s" when a leg finishes within the
   5 s start-up allowance. Use tools\timing_report.py instead.
 - v1 results (seeds 1-10): 90 wins in 90 matches against the nine zoo bots; see
