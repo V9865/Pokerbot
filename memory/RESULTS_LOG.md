@@ -130,8 +130,19 @@ rof_loose            held-out    10     9-0-1      +2.34   +-1.07    +0.80     +
 rof_big              held-out    10    10-0-0      +3.89   +-1.58    +0.89     +0.43
 rof_small            held-out    10     9-0-1      +2.20   +-0.81    +0.89     -0.95
 liar                 held-out    10    10-0-0      +3.99   +-0.92    +1.00     +0.62
-friend               held-out    10     7-0-3      +0.91   +-0.96    +0.33     +1.31
+friend               held-out    10     7-0-3      +0.91   +-0.96    +0.33     +1.31  (Stage 1 preliminary; final v1.1 is 9-0-1 in S1, 10-0-0 in S2)
 ```
 All 16 matchups won. Problems: 0 notices, 0 forfeits, 0 tracebacks.
 Average gain on design set: +0.55 chips/hand.
 Average gain on held-out set: +0.71 chips/hand (> 100% of design set gain).
+
+## 2026-11-11 Re-run of Friend Bot (Fixed Seeds 1-20, Apples-to-Apples Comparison)
+Ran on final committed v1.1 `dist/bot.py` across identical seed lists:
+- **Stage 1 (400 hands/match, 200/leg, seeds 1-20)**: `runs/friend_s1_20/results.csv`
+  * Record: **16-0-4**, **+1.02 +- 0.48 chips/hand** (capped +0.67)
+  * Seeds 1-10: **9-0-1** (only seed 6 lost: -0.59 chips/hand)
+- **Stage 2 (1,000 hands/match, 500/leg, seeds 1-20)**: `runs/friend_s2_20_final/results.csv`
+  * Record: **18-0-2**, **+1.20 +- 0.31 chips/hand** (capped +0.81)
+  * Seeds 1-10: **10-0-0** (all 10 seeds won!)
+  * Seeds 11-20: 8-0-2 (minor losses on seed 11: -0.19, seed 17: -0.09)
+
