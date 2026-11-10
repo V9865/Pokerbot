@@ -17,6 +17,12 @@ description: How to measure the Discard Hold'em bot - the test opponents (zoo) i
 | ai_typical_v2.py | same family with value raises, call margins, flop bluffs, simulated discard | a stronger AI-written design |
 | gto_like.py | wide opens, minimum defence frequency, polarised bets with a fixed bluff ratio, two sizes, mixing, equity-max discard | "GTO + discard" bots |
 | recorder.py | logs requests; used by tools\test_history.py | (test helper) |
+| raise_or_fold.py | stand-in with friend's style: tight preflop, polarised postflop | friend's bot surrogate |
+| rof_tight.py | button raise top 8%, folds worst 30% | tight friend variant |
+| rof_loose.py | button raise top 30%, folds worst 5% | loose friend variant |
+| rof_big.py | all bets 0.8-1.2 pot, bluffs 40% of time | big bettor friend variant |
+| rof_small.py | bets 0.25-0.4 pot, calls under 0.5 pot | small bettor friend variant |
+| liar.py | big bets with weak hands, small bets with strong hands | reversed bet-sizing |
 | friend.py | the friend's bot | external competitor |
 | exploiter.py | adaptive bot attacking our patterns | robustness test |
 | exploiter2.py | second exploit variant | robustness test |

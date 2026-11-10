@@ -9,7 +9,11 @@ traceback. Timing from parallel runs is inflated; use tools\timing_report.py.
 import argparse, csv, math, os, re, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ZOO = ["station", "random_bot", "shover", "maniac", "nit", "minraiser", "ai_typical", "ai_typical_v2", "gto_like"]
+ZOO = [
+    "station", "random_bot", "shover", "maniac", "nit", "minraiser",
+    "ai_typical", "ai_typical_v2", "gto_like", "raise_or_fold",
+    "rof_tight", "rof_loose", "rof_big", "rof_small", "liar", "friend"
+]
 
 
 def parse_seeds(s):

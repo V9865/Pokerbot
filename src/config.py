@@ -15,6 +15,7 @@ CFG = {
     "PF_CALL_Q_HUGE": 0.14,     # call a raise-to of <= 80
     "PF_CALL_Q_ALLIN": 0.05,    # call more than 80 (all-in territory), before adaptation
     "PF_SHOVE_ADAPT": 0.47,     # vs frequent big raisers: call q <= this * their big-raise frequency
+    "PF_CALL_PFR_MULT": 1.3,    # scale preflop call threshold vs button raise by their PFR
     # ---- postflop
     "OOP_PENALTY": 0.02,        # equity discount when out of position
     "UNCERTAINTY": 0.25,        # weight on the unfiltered range when estimating equity
@@ -31,10 +32,14 @@ CFG = {
     "BLUFF_FLOP": 0.12, "BLUFF_TURN": 0.06, "BLUFF_RIVER": 0.04,
     "BLUFF_MAX_EQ": 0.40,       # only bluff hands below this equity
     "BLUFF_SIZE": 0.60,
+    "EV_BET_SIZES": (0.33, 0.50, 0.75, 1.0), # candidate pot fractions when betting by EV
+    "EV_PRIOR_WEIGHT": 8,       # prior weight for learning fold/call/raise rates to our bets
+    "EV_MIX_MARGIN": 0.03,      # river mix threshold: mix 50/50 if best bet beats check by < this * pot
     # range narrowing: share of their range kept (strongest first) after each of their actions
     "SHRINK_PF_RAISE": 0.85, "SHRINK_PF_3BET": 0.50, "SHRINK_PF_4BET": 0.35,
     "SHRINK_BET_SMALL": 0.75, "SHRINK_BET_MED": 0.60, "SHRINK_BET_LARGE": 0.50, "SHRINK_BET_OVER": 0.40,
     "SHRINK_RAISE_EXTRA": 0.80, "SHRINK_CALL": 0.85, "SHRINK_FLOOR": 0.08,
+    "SHRINK_PRIOR_WEIGHT": 6,   # prior weight for learning opponent bet-size shrinkage
     # ---- opponent model
     "STAT_N0": 10,              # prior weight for smoothed frequencies
     "STATION_FOLD": 0.15,       # fold-to-bet below this (after STATION_MIN bets) = calling station

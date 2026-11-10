@@ -67,3 +67,71 @@ gto_like  seed 1 leg 1: 8.22s (11.0%), max 33.3 ms | leg 2: 9.26s (12.3%), max 3
 gto_like  seed 2 leg 1: 8.27s (11.0%), max 32.0 ms | leg 2: 7.90s (10.5%), max 35.5 ms
 ```
 All modes FULL [N, 0, 0, 0]. Exit codes 0.
+
+
+## 2026-11-11 v1 baseline on Windows (seeds matching v1.1 evaluation)
+```
+opponent             n     W-D-L chips/hand   95% CI   capped
+friend (stage 2)    20    7-0-13      -0.40   +-0.46    -0.20
+raise_or_fold       30    26-0-4      +1.38   +-0.42    +0.72
+rof_tight           20    15-0-5      +0.87   +-1.01    +0.51
+rof_loose           20    15-0-5      +0.82   +-0.88    +0.42
+rof_big             20    20-0-0      +3.46   +-0.60    +0.97
+rof_small           20    20-0-0      +3.15   +-0.56    +0.97
+liar                20    19-0-1      +3.37   +-0.69    +0.91
+```
+
+## 2026-11-11 Generalization Guard: v1.1 vs rof variants and liar (seeds 1-20)
+Command: py -3.11 tools\run_matches.py --bot dist\bot.py --opps rof_tight,rof_loose,rof_big,rof_small --seeds 1-20
+```
+opponent             n     W-D-L chips/hand   95% CI   capped  gain vs v1
+rof_tight           20    18-0-2      +2.20   +-0.84    +0.80     +1.33 (improves beyond CI)
+rof_loose           20    15-0-5      +2.07   +-0.80    +0.60     +1.25 (improves beyond CI)
+rof_big             20    19-0-1      +4.20   +-0.99    +0.90     +0.74 (improves)
+rof_small           20    19-0-1      +2.15   +-0.61    +0.82     -1.00 (within CI, 19 wins)
+liar                20    19-0-1      +3.22   +-0.88    +0.90     -0.15 (within CI, 19 wins)
+```
+Passes Generalization Guard Rule 2 (improves in 3 of 4 variants, none worse beyond CI) and Rule 3 (Fix A reverses meaning within 30 showdowns, no regression beyond CI).
+
+## 2026-11-11 Acceptance Gates: v1.1 vs Friend and Raise-or-Fold
+Commands:
+py -3.11 tools\run_matches.py --bot dist\bot.py --opps friend --stage 2 --seeds 1-20 --tag v11_friend_s2
+py -3.11 tools\run_matches.py --bot dist\bot.py --opps raise_or_fold --seeds 1-30 --tag v11_rof_s1
+```
+opponent             n     W-D-L chips/hand   95% CI   capped  gain vs v1
+friend (stage 2)    20    18-0-2      +0.98   +-0.39    +0.70     +1.38 (improves beyond CI)
+raise_or_fold       30    27-0-3      +2.03   +-0.60    +0.77     +0.65 (improves beyond CI)
+```
+
+## 2026-11-11 Regression Gate: v1.1 vs snapshots\v1_bot.py, seeds 1-40
+Command: py -3.11 tools\run_matches.py --bot dist\bot.py --opps snapshots\v1_bot.py --seeds 1-40 --jobs 8 --tag v11_vs_v1_current
+```
+opponent             n     W-D-L chips/hand   95% CI   capped
+v1_bot              40   28-0-12      +0.44   +-0.39    +0.27
+```
+Gate criteria: wins >= losses (28 >= 12, PASS), mean > -0.2 chips/hand (+0.44 > -0.2, PASS).
+
+## 2026-11-11 Full Zoo and Leave-One-Out Report: seeds 1-10
+Command: py -3.11 tools\run_matches.py --bot dist\bot.py --opps all --seeds 1-10 --jobs 8 --tag v11_full_zoo
+```
+opponent             group        n     W-D-L chips/hand   95% CI   capped  gain vs v1
+station              held-out    10    10-0-0     +22.68   +-1.36    +1.00     +7.85
+random_bot           held-out    10    10-0-0     +10.28   +-1.53    +1.00     +0.31
+shover               held-out    10    10-0-0     +22.83   +-2.34    +1.00     +0.55
+maniac               held-out    10    10-0-0     +33.24   +-2.28    +1.00     +2.69
+nit                  held-out    10     8-0-2      +0.98   +-0.64    +0.55     -0.87
+minraiser            held-out    10    10-0-0     +28.33   +-2.48    +1.00     -6.98
+ai_typical           held-out    10    10-0-0      +9.36   +-1.70    +1.00     +1.96
+ai_typical_v2        held-out    10    10-0-0      +7.75   +-1.38    +1.00     +0.10
+gto_like             held-out    10    10-0-0      +3.07   +-0.64    +1.00     +0.25
+raise_or_fold        design-set  10     9-0-1      +1.93   +-0.85    +0.83     +0.55
+rof_tight            held-out    10    10-0-0      +2.72   +-1.20    +0.88     +1.85
+rof_loose            held-out    10     9-0-1      +2.34   +-1.07    +0.80     +1.52
+rof_big              held-out    10    10-0-0      +3.89   +-1.58    +0.89     +0.43
+rof_small            held-out    10     9-0-1      +2.20   +-0.81    +0.89     -0.95
+liar                 held-out    10    10-0-0      +3.99   +-0.92    +1.00     +0.62
+friend               held-out    10     7-0-3      +0.91   +-0.96    +0.33     +1.31
+```
+All 16 matchups won. Problems: 0 notices, 0 forfeits, 0 tracebacks.
+Average gain on design set: +0.55 chips/hand.
+Average gain on held-out set: +0.71 chips/hand (> 100% of design set gain).

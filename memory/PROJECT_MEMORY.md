@@ -3,16 +3,27 @@
 Read this first in every conversation. Update it at the end of every phase.
 
 ## 1. Status
-- Phase: Phase 0 (verify on this machine) complete and passed.
-- Current bot: v1 = dist\bot.py = snapshots\v1_bot.py (snapshots\v0_bot.py is the
-  same bot without the fold-rate exploits).
-- Uploaded to Unstop: nothing yet (v1 ready for upload).
-- Verified on Windows (Python 3.11.18, numpy 1.26.4, scipy 1.17.1, 20 logical cores).
-  All test tools, bundle, fuzz, timing reports, and match runs passed with zero errors/notices/forfeits.
-- v1 lost heavily to the user's friend's bot (11 Nov, no log kept).
+- Phase: v1.1 complete, fully tested, and passed all acceptance gates.
+- Current bot: v1.1 = dist\bot.py = snapshots\v1_1_bot.py.
+- Uploaded to Unstop: ready to upload v1.1.
+- Benchmarks:
+  * Head-to-head vs v1: 28-0-12, +0.44 +- 0.39 chips/hand (Regression gate PASSED).
+  * vs friend (Stage 2): 18-0-2, +0.98 +- 0.39 chips/hand (+1.38 gain vs v1's -0.40, PASSED).
+  * vs raise_or_fold: 27-0-3, +2.03 +- 0.60 chips/hand (+0.65 gain vs v1, PASSED).
+  * Full zoo (seeds 1-10): All 16 matchups won (including rof variants and liar), 0 problems.
+  * Generalization guard: Design-set gain +0.55/hand, Held-out set gain +0.71/hand (>100% of design gain).
+  * Timing: Stage 1 ~2.8s (9.5%), Stage 2 ~7.2s (9.6%), max reply 24.6 ms (all < 250 ms, all FULL mode).
 
 ## 2. Next step
-Upload dist\bot.py (v1) to Unstop, then run phase-2-features Step 0 (friend's bot diagnosis).
+Upload dist\bot.py (v1.1) to Unstop.
+
+## 2b. Change log
+- 2026-11-11 v1.1 (fix-v1-1):
+  * Stand-in opponent: implemented opponents\raise_or_fold.py plus 4 variants (rof_tight, rof_loose, rof_big, rof_small) and mirrored opponent liar.py.
+  * Fix A (Adaptive size reading): at showdowns, calculates card strength percentile p using eval_batch; learns s_k per bet size bucket (small, med, large, over) smoothed with prior weight 6 and clamped to +-0.22 of prior until 30 showdowns.
+  * Fix B (EV betting & bluffing): replaces fixed betting with EV maximization over {0.33, 0.50, 0.75, 1.0} * pot vs EV(check), with response rates learned per bucket, station protections, and river mixing.
+  * Fix C (Preflop raise scaling): scales BB calling threshold and 3-betting against button open raises based on observed pfr_btn, with adaptation bounded to nominal +-0.20.
+  * Generalization guard: confirmed robustness across all 4 rof variants and liar; verified held-out gains exceed design-set gains.
 
 ## 3. Decisions
 - 2026-11-10 (user): Windows laptop; build phase by phase; playing style
@@ -41,6 +52,13 @@ Upload dist\bot.py (v1) to Unstop, then run phase-2-features Step 0 (friend's bo
   * final upload by 12-13 Nov; stages C and D of training are optional.
 
 ## 4. Facts and lessons
+- Diagnosis of 50 Stage-2 matches (50,000 hands) of v1 vs friend's bot:
+  * v1 lost 31 of 50 matches, -11,871 chips (-0.24/hand); -0.83/hand as BB, +0.35 as button.
+  * Friend's style: button opens top ~15% to 6, limps rest, folds worst 18%; BB 3-bets top ~5%, calls almost everything. Postflop bets ~1.0 pot are ahead 83-90% of the time, bets ~0.33 pot only 38-50%. Facing our 0.45-0.85 pot bets it almost never calls (0-6%): folds 56-79%, raises 15-43%.
+  * Leak 1: calls vs big bets lost ~150k chips vs folding; calls vs small bets gained ~250k. Bet size reflects hand strength; v1 previously ignored size.
+  * Leak 2: under-bluffing: we bet only 43-56% when checked to although friend folds 56-79% to our bets.
+  * Leak 3: calling its preflop raises with average hands lost -17,800 chips.
+  * Non-leaks: our river folds were correct (behind 94% of the time); discards both followed cheap rule (85-88%).
 - Preflop equities are compressed: best hand 0.794, top 10% 0.596, median
   0.492, worst 0.306. Only pairs of aces are big favourites. Three of a kind
   in hand is among the worst holdings.
