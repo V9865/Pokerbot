@@ -1,0 +1,3 @@
+Copy the three competition PDFs into this folder for reference:
+problem_statement.pdf, protocol_specification.pdf, rulebook.pdf.
+The agent does not need them: the rules are in .agents\skills\discard-holdem-rules\SKILL.md.
