@@ -187,7 +187,7 @@ class BayesRange:
                     self.w2 = np.ones(len(self.w2)) / max(1, len(self.w2))
         return self.w2
 
-    def update_range2(self, street_board, action, amount=None, pot=1.0):
+    def update_range2(self, street_board, action, amount=None, pot=1.0, street=None, facing=False):
         """Update Range2 on opponent turn/river action.
         Follows no-double-counting rule: bet likelihood comes from Fix A s_k."""
         if not HAVE_NP or self.w2 is None or self.w2_hands is None:
@@ -208,6 +208,8 @@ class BayesRange:
             frac = (amount or pot) / max(1.0, pot)
             # Learned bet size meaning s_k
             s_k = self.opp_model.shrink(frac) if hasattr(self.opp_model, "shrink") else 0.50
+            if street and CFG.get("USE_FREQ_FLOOR", False) and hasattr(self.opp_model, "action_floor"):
+                s_k = max(s_k, self.opp_model.action_floor(street, facing, frac))
             floor = float(CFG.get("SHRINK_FLOOR", 0.08))
             w = 0.05  # smoothed boundary over +-5 percentile points
             lik = floor + (1.0 - floor) * sig((s_k - q) / w)

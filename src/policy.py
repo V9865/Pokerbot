@@ -84,7 +84,11 @@ def decide_preflop(req, brain, pf_raises, params):
         if pf_raises == 1:
             t3 = params.get("PF_3BET_Q", 0.08)
             if brain.seat == "big_blind":
-                t3 = min(t3, 0.30 * brain.opp.pfr_btn())
+                # 3-bet wider against wide openers, tighter against tight ones
+                if CFG.get("PF_3BET_SCALE", True):
+                    t3 = t3 * clamp(brain.opp.pfr_btn() / 0.45, 0.5, 2.0)
+                else:
+                    t3 = min(t3, 0.30 * brain.opp.pfr_btn())
             if q <= t3:
                 return {"action": "raise", "amount": min(hi, 3 * opp_bet)}
         if pf_raises == 2 and q <= params.get("PF_4BET_Q", 0.03):
@@ -154,7 +158,10 @@ def decide_postflop(req, brain, mode, x, params, rng):
                 beta_multi = float(params.get("BETA_MULTI", 0.0))
                 ev_future = c_b * beta_multi * delta_pot
 
-                ev_b = f_b * pot + c_b * (e_call_b * (pot + 2.0 * b) - b) + ev_future - r_b * b
+                # when raised (assume to ~3b) we continue only if it pays: lose b at worst
+                e_raise_b = top(max(CFG["SHRINK_FLOOR"], x_call * r_b / max(1e-6, c_b + r_b)))
+                ev_raised = max(-b, e_raise_b * (pot + 6.0 * b) - 3.0 * b) if CFG.get("RAISE_EV", True) else -b
+                ev_b = f_b * pot + c_b * (e_call_b * (pot + 2.0 * b) - b) + ev_future + r_b * ev_raised
                 candidate_actions.append(b_action)
                 ev_scores.append(ev_b)
 
