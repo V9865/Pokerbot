@@ -35,9 +35,21 @@ CFG = {
     "BLUFF_FLOP": 0.12, "BLUFF_TURN": 0.06, "BLUFF_RIVER": 0.04,
     "BLUFF_MAX_EQ": 0.40,       # only bluff hands below this equity
     "BLUFF_SIZE": 0.60,
-    "EV_BET_SIZES": (0.33, 0.50, 0.75, 1.0), # candidate pot fractions when betting by EV
+    "USE_SIZE_GRID": False,     # if False, decisions use v1.1 4-bucket sizing; grid counts kept as features
+    "EV_BET_SIZES": (0.33, 0.50, 0.75, 1.0), # candidate pot fractions when betting by EV in v1.1
+    "BET_GRID": (0.25, 0.33, 0.45, 0.60, 0.75, 1.00, 1.40),
+    "BET_GRID_PRIORS": (
+        (0.25, 0.65, 0.10),
+        (0.30, 0.60, 0.10),
+        (0.40, 0.50, 0.10),
+        (0.45, 0.46, 0.09),
+        (0.50, 0.42, 0.08),
+        (0.55, 0.40, 0.05),
+        (0.60, 0.38, 0.02),
+    ),
     "EV_PRIOR_WEIGHT": 8,       # prior weight for learning fold/call/raise rates to our bets
     "EV_MIX_MARGIN": 0.03,      # river mix threshold: mix 50/50 if best bet beats check by < this * pot
+    "USE_BAYES": True,          # switch for Bayesian opponent ranges (Phase 2 Step 2)
     # range narrowing: share of their range kept (strongest first) after each of their actions
     "SHRINK_PF_RAISE": 0.85, "SHRINK_PF_3BET": 0.50, "SHRINK_PF_4BET": 0.35,
     "SHRINK_BET_SMALL": 0.75, "SHRINK_BET_MED": 0.60, "SHRINK_BET_LARGE": 0.50, "SHRINK_BET_OVER": 0.40,
@@ -1684,7 +1696,8 @@ if HAVE_NP:
         msc = eval7(list(hole2) + list(board5))
         res = (msc > osc) + 0.5 * (msc == osc)
         w = np.ones(m) if weights is None else weights
-        return float((res * w).sum() / w.sum()), hands, osc, res
+        w_sum = w.sum()
+        return float((res * w).sum() / (w_sum if w_sum > 0 else 1.0)), hands, osc, res
 
     def turn_equity(hole2, board4, dead, weights=None, river_step=1):
         """Exact over all opponent hands and river cards (river_step > 1 uses
@@ -1712,20 +1725,23 @@ if HAVE_NP:
         per_hand = np.bincount(hi, weights=res, minlength=m) / np.maximum(ok.sum(1), 1)
         opp_now = eval_batch(np.concatenate([hands, np.tile(b4, (m, 1))], axis=1))
         w = np.ones(m) if weights is None else weights
-        return float((per_hand * w).sum() / w.sum()), hands, opp_now, per_hand
+        w_sum = w.sum()
+        return float((per_hand * w).sum() / (w_sum if w_sum > 0 else 1.0)), hands, opp_now, per_hand
 
     def top_share_equity(result, strength, weights, share):
         """Equity against only the strongest `share` (by weight) of the range.
         result: our outcome vs each hand/sample; strength: opponent strength."""
-        if share >= 0.999:
-            return float((result * weights).sum() / weights.sum())
+        w_sum = weights.sum()
+        if share >= 0.999 or w_sum <= 0:
+            return float((result * weights).sum() / (w_sum if w_sum > 0 else 1.0))
         order = np.argsort(-strength, kind="stable")
         w = weights[order]
         cum = np.cumsum(w)
         cut = share * cum[-1]
         k = int(np.searchsorted(cum, cut)) + 1
         k = max(1, min(k, w.size))
-        return float((result[order][:k] * w[:k]).sum() / w[:k].sum())
+        k_sum = w[:k].sum()
+        return float((result[order][:k] * w[:k]).sum() / (k_sum if k_sum > 0 else 1.0))
 
 
 def scalar_equity(hole, board, dead, n, rnd=random):
@@ -1754,6 +1770,587 @@ def scalar_equity(hole, board, dead, n, rnd=random):
         tot += 1.0 if m > o else (0.5 if m == o else 0.0)
     return tot / max(1, n)
 
+# ==================== ranges ====================
+"""Bayesian opponent range modeling for Discard Hold'em.
+
+Range3: 22,100 combinations of 3 cards (preflop and flop before discard).
+Range2: up to 990 combinations of 2 cards (turn, river, and post-discard flop).
+Matches equity.opp_hands order so weights can be passed directly to
+turn_equity, river_equity, and top_share_equity.
+"""
+import math
+
+if HAVE_NP:
+    import numpy as np
+
+    # Precomputed combinations and masks
+    ALL_COMBOS_3 = np.empty((22100, 3), dtype=np.int64)
+    for _c in range(52):
+        for _b in range(_c):
+            for _a in range(_b):
+                ALL_COMBOS_3[hand_index(_a, _b, _c)] = (_a, _b, _c)
+
+    ALL_MASKS_3 = (1 << ALL_COMBOS_3[:, 0]) | (1 << ALL_COMBOS_3[:, 1]) | (1 << ALL_COMBOS_3[:, 2])
+    _C2_ARR = np.array(_C2, dtype=np.int64)
+    _C3_ARR = np.array(_C3, dtype=np.int64)
+    Q3 = np.frombuffer(PF_Q, dtype=np.uint16) / 65535.0
+
+    def sig(z):
+        """Numerically stable sigmoid."""
+        return 1.0 / (1.0 + np.exp(-np.clip(z, -30.0, 30.0)))
+
+
+class BayesRange:
+    """Tracks opponent's Bayesian range through a hand."""
+
+    def __init__(self, opp_model, dead_initial=None):
+        self.opp_model = opp_model
+        self.dead_initial = list(dead_initial) if dead_initial else []
+        self.w3 = None
+        self.w2 = None
+        self.w2_hands = None
+
+        if HAVE_NP:
+            self.w3 = np.ones(22100, dtype=np.float64)
+            if self.dead_initial:
+                dead_mask = 0
+                for c in self.dead_initial:
+                    dead_mask |= (1 << c)
+                clash = (ALL_MASKS_3 & dead_mask) != 0
+                self.w3[clash] = 0.0
+                live = ~clash
+                if np.any(live):
+                    self.w3[live] /= np.sum(self.w3[live])
+
+    def update_preflop(self, action, amount=None, is_3bet=False, is_4bet=False):
+        """Update Range3 on opponent preflop action."""
+        if not HAVE_NP or self.w3 is None:
+            return
+
+        w = 0.06
+        floor = 0.08
+
+        if action == "raise":
+            if is_4bet:
+                t = 0.04
+            elif is_3bet:
+                t = 0.10
+            else:
+                t = self.opp_model.pfr_btn() if hasattr(self.opp_model, "pfr_btn") else 0.45
+            lik = floor + (1.0 - floor) * sig((t - Q3) / w)
+        elif action == "call":
+            t_call = 0.80
+            t_raise = self.opp_model.pfr_btn() if hasattr(self.opp_model, "pfr_btn") else 0.45
+            lik = floor + (1.0 - floor) * sig((t_call - Q3) / w) * (1.0 - 0.6 * sig((0.5 * t_raise - Q3) / w))
+        elif action in ("check", "limp"):
+            t_raise = self.opp_model.pfr_btn() if hasattr(self.opp_model, "pfr_btn") else 0.45
+            lik = 1.0 - 0.7 * sig((t_raise - Q3) / w)
+        else:
+            return
+
+        live = (self.w3 > 0.0)
+        self.w3[live] *= lik[live]
+        # Weight floor at 0.05 * mean
+        if np.any(live):
+            mean_w = np.mean(self.w3[live])
+            floor_w = 0.05 * mean_w
+            self.w3[live] = np.maximum(self.w3[live], floor_w)
+            total = np.sum(self.w3[live])
+            if total > 0:
+                self.w3[live] /= total
+
+    def sample_opp3(self, n, rng, current_dead=None):
+        """Sample n opponent 3-card hands from Range3."""
+        if not HAVE_NP or self.w3 is None:
+            return None
+
+        p = self.w3.copy()
+        if current_dead:
+            dead_mask = 0
+            for c in current_dead:
+                dead_mask |= (1 << c)
+            clash = (ALL_MASKS_3 & dead_mask) != 0
+            p[clash] = 0.0
+
+        total = np.sum(p)
+        if total <= 0:
+            live = (p > 0)
+            if not np.any(live):
+                live = ~clash
+            p = live.astype(np.float64) / max(1, np.sum(live))
+        else:
+            p /= total
+
+        cum = np.cumsum(p)
+        r = rng.random(n) * cum[-1]
+        indices = np.searchsorted(cum, r)
+        indices = np.clip(indices, 0, len(ALL_COMBOS_3) - 1)
+        return ALL_COMBOS_3[indices]
+
+    def init_range2(self, hole2, board3, my_discard, opp_discard, discard_rule_probs=None):
+        """Construct Range2 after opponent discard is revealed."""
+        if not HAVE_NP:
+            return
+
+        dead_all = [c for c in (my_discard, opp_discard) if c is not None]
+        hands, unseen = opp_hands(hole2, board3, dead_all)
+        m = hands.shape[0]
+        if m == 0:
+            return
+
+        self.w2_hands = hands
+
+        # Find 3-card combination indices for triplets [opp_discard, c1, c2]
+        triplets = np.column_stack([np.full(m, opp_discard, dtype=np.int64), hands])
+        s_triplets = np.sort(triplets, axis=1)
+        a, b, c = s_triplets[:, 0], s_triplets[:, 1], s_triplets[:, 2]
+        idx3 = _C3_ARR[c] + _C2_ARR[b] + a
+
+        prior_w = self.w3[idx3] if self.w3 is not None else np.ones(m)
+
+        # Discard likelihood L(opp_discard | rule, hand)
+        # 1. LOWEST rule: min card ID
+        lowest_matches = (np.min(triplets, axis=1) == opp_discard)
+        p_lowest = np.where(lowest_matches, 0.90, 0.05)
+
+        # 2. CHEAP rule
+        board_tile = np.tile(np.array(board3, dtype=np.int64), (m, 1))
+        _, cheap_discs = cheap_keep_batch(triplets, board_tile)
+        cheap_matches = (cheap_discs == opp_discard)
+        p_cheap = np.where(cheap_matches, 0.90, 0.05)
+
+        # 3. RANDOM rule
+        p_random = 1.0 / 3.0
+
+        probs = discard_rule_probs if discard_rule_probs is not None else [0.40, 0.40, 0.20]
+        p_low, p_ch, p_rnd = probs[0], probs[1], probs[2]
+
+        l_disc = p_low * p_lowest + p_ch * p_cheap + p_rnd * p_random
+
+        w2 = prior_w * l_disc
+        mean_w = np.mean(w2)
+        floor_w = 0.05 * mean_w
+        w2 = np.maximum(w2, floor_w)
+        total = np.sum(w2)
+        if total > 0:
+            w2 /= total
+        self.w2 = w2
+
+    def get_weights2(self, board_ids):
+        """Returns w2 aligned with opp_hands(hole, board_ids, dead). Filters out
+        any cards that match board_ids (e.g. turn and river cards)."""
+        if not HAVE_NP or self.w2 is None or self.w2_hands is None:
+            return None
+        board_raw = [b if isinstance(b, int) else CARD_ID[b] for b in board_ids]
+        for b in board_raw[3:]:
+            mask = (self.w2_hands[:, 0] != b) & (self.w2_hands[:, 1] != b)
+            if not np.all(mask):
+                self.w2_hands = self.w2_hands[mask]
+                self.w2 = self.w2[mask]
+                s = np.sum(self.w2)
+                if s > 0:
+                    self.w2 /= s
+                else:
+                    self.w2 = np.ones(len(self.w2)) / max(1, len(self.w2))
+        return self.w2
+
+    def update_range2(self, street_board, action, amount=None, pot=1.0):
+        """Update Range2 on opponent turn/river action.
+        Follows no-double-counting rule: bet likelihood comes from Fix A s_k."""
+        if not HAVE_NP or self.w2 is None or self.w2_hands is None:
+            return
+
+        board_raw = [b if isinstance(b, int) else CARD_ID[b] for b in street_board]
+        self.get_weights2(board_raw)
+        m = self.w2_hands.shape[0]
+        b_tile = np.tile(np.array(board_raw, dtype=np.int64), (m, 1))
+        eval_input = np.concatenate([self.w2_hands, b_tile], axis=1)
+        scores = eval_batch(eval_input)
+
+        # Strength percentile q (0 = strongest, 1 = weakest)
+        ranks = np.argsort(np.argsort(-scores))
+        q = ranks / float(max(1, m - 1))
+
+        if action == "raise":
+            frac = (amount or pot) / max(1.0, pot)
+            # Learned bet size meaning s_k
+            s_k = self.opp_model.shrink(frac) if hasattr(self.opp_model, "shrink") else 0.50
+            floor = float(CFG.get("SHRINK_FLOOR", 0.08))
+            w = 0.05  # smoothed boundary over +-5 percentile points
+            lik = floor + (1.0 - floor) * sig((s_k - q) / w)
+        elif action == "call":
+            w = 0.08
+            floor = float(CFG.get("SHRINK_FLOOR", 0.08))
+            t_call = 0.65
+            lik = floor + (1.0 - floor) * sig((t_call - q) / w) * (1.0 - 0.5 * sig((0.10 - q) / w))
+        elif action == "check":
+            w = 0.08
+            lik = 1.0 - 0.6 * sig((0.15 - q) / w)
+        else:
+            return
+
+        self.w2 *= lik
+        mean_w = np.mean(self.w2)
+        floor_w = 0.05 * mean_w
+        self.w2 = np.maximum(self.w2, floor_w)
+        total = np.sum(self.w2)
+        if total > 0:
+            self.w2 /= total
+
+
+# ==================== features ====================
+"""Hand-strength, potential, blocker, and texture features.
+
+Features are computed once per decision in FULL mode (under 15-25 ms) and cached.
+In PANIC mode or pure-Python fallback, fast scalar approximations are used.
+All returned features are floats within well-defined ranges [0, 1].
+"""
+import itertools, math, random
+
+if HAVE_NP:
+    import numpy as np
+
+# ------------------------------------------------------------- Precomputed tables
+# Precompute the unconditioned top 10% 3-card preflop hands (for block_top10)
+_TOP10_PREFLOP_HANDS = None
+
+def _get_top10_preflop_hands():
+    global _TOP10_PREFLOP_HANDS
+    if _TOP10_PREFLOP_HANDS is None:
+        combos = list(itertools.combinations(range(52), 3))
+        # Top 10% hands from preflop_table (q <= 0.10)
+        top_list = [h for h in combos if preflop_table.preflop_q(*h) <= 0.10]
+        if HAVE_NP:
+            _TOP10_PREFLOP_HANDS = np.array(top_list, dtype=np.int64)
+        else:
+            _TOP10_PREFLOP_HANDS = [set(h) for h in top_list]
+    return _TOP10_PREFLOP_HANDS
+
+
+def blocker_top10(our_cards):
+    """Share of the top 10% of opponent's unconditioned 3-card preflop range
+    removed (blocked) by our cards. Float in [0.0, 1.0]."""
+    top10 = _get_top10_preflop_hands()
+    n = len(top10)
+    if n == 0:
+        return 0.0
+    if HAVE_NP and isinstance(top10, np.ndarray):
+        blocked = np.isin(top10, list(our_cards)).any(axis=1).sum()
+        return float(blocked / n)
+    else:
+        our_set = set(our_cards)
+        blocked = sum(1 for h in top10 if our_set.intersection(h))
+        return float(blocked / n)
+
+
+def board_texture(board):
+    """Returns (tex_flush, tex_straight, tex_paired).
+    - tex_flush: 0.0 (no flush possible), 0.5 (flush draw possible, 2 of suit), 1.0 (flush possible, >=3 of suit).
+    - tex_straight: 0.0 (no straight possible), 0.5 (straight draw possible, 2 ranks in 5-rank window),
+                    1.0 (straight possible with 2 hole cards, >=3 ranks in 5-rank window).
+    - tex_paired: 1.0 if board has duplicate ranks, else 0.0.
+    """
+    if not board:
+        return 0.0, 0.0, 0.0
+    # Flush texture
+    suits = [c & 3 for c in board]
+    max_s = max(suits.count(s) for s in range(4)) if suits else 0
+    tex_flush = 1.0 if max_s >= 3 else 0.5 if max_s == 2 else 0.0
+
+    # Paired texture
+    ranks = [c >> 2 for c in board]
+    tex_paired = 1.0 if len(ranks) != len(set(ranks)) else 0.0
+
+    # Straight texture
+    if len(board) < 2:
+        tex_straight = 0.0
+    else:
+        r_set = set(ranks)
+        if 12 in r_set: # Ace can be low
+            r_set.add(-1)
+        max_in_window = 0
+        for low in range(-1, 9):
+            window = set(range(low, low + 5))
+            cnt = len(r_set.intersection(window))
+            if cnt > max_in_window:
+                max_in_window = cnt
+        tex_straight = 1.0 if max_in_window >= 3 else 0.5 if max_in_window == 2 else 0.0
+
+    return tex_flush, tex_straight, tex_paired
+
+
+# ------------------------------------------------------------- Features computation
+_FEATURE_CACHE = {}
+
+def clear_feature_cache():
+    global _FEATURE_CACHE
+    _FEATURE_CACHE.clear()
+
+
+def compute_features(hole, board, dead=None, opp_weights=None, opp_discard=None, p_lowest=0.5, panic=False):
+    """Compute hand-strength, potential, blocker, and texture features.
+    
+    Parameters:
+      hole: list of 2 or 3 card ids
+      board: list of card ids (flop, turn, or river)
+      dead: list of known dead card ids (e.g. discards)
+      opp_weights: optional weights over opp 2-card hands (for turn/river)
+      opp_discard: optional card id of opponent's discard
+      p_lowest: posterior probability that opponent discards by LOWEST rule
+      panic: if True, returns cheap approximations
+      
+    Returns dict:
+      e_show, e_now, ehs2, ppot, npot, e_top25, e_top50, rank_in_range,
+      block_top10, tex_flush, tex_straight, tex_paired, opp_disc_rank, p_lowest
+    """
+    dead_tuple = tuple(sorted(dead)) if dead else ()
+    cache_key = (tuple(hole), tuple(board), dead_tuple, id(opp_weights), opp_discard, panic)
+    if cache_key in _FEATURE_CACHE:
+        return _FEATURE_CACHE[cache_key]
+
+    tex_flush, tex_straight, tex_paired = board_texture(board)
+    block_top = blocker_top10(hole)
+    opp_disc_r = (opp_discard >> 2) / 12.0 if opp_discard is not None else 0.5
+
+    # Base dictionary for preflop or cheap fallback
+    st = len(board)
+    if st == 0 or panic or not HAVE_NP:
+        # Preflop or panic/fallback approximation
+        if len(hole) == 3:
+            e_base = preflop_table.preflop_equity(*hole) if st == 0 else 0.50
+        else:
+            e_base = 0.50
+        out = {
+            "e_show": float(e_base),
+            "e_now": float(e_base),
+            "ehs2": float(e_base ** 2),
+            "ppot": 0.0,
+            "npot": 0.0,
+            "e_top25": float(max(0.0, e_base * 0.6)),
+            "e_top50": float(max(0.0, e_base * 0.8)),
+            "rank_in_range": float(e_base),
+            "block_top10": float(block_top),
+            "tex_flush": float(tex_flush),
+            "tex_straight": float(tex_straight),
+            "tex_paired": float(tex_paired),
+            "opp_disc_rank": float(opp_disc_r),
+            "p_lowest": float(p_lowest),
+        }
+        _FEATURE_CACHE[cache_key] = out
+        return out
+
+    # ------------------------------------------------------------- River (5 board cards)
+    if st == 5:
+        # 2 hole cards on river
+        h2 = hole[:2] if len(hole) > 2 else hole
+        e_show, hands, osc, res = river_equity(h2, board, dead or [], weights=opp_weights)
+        msc = eval7(list(h2) + list(board))
+        w = np.ones(hands.shape[0]) if opp_weights is None else opp_weights
+        
+        # rank_in_range: weighted fraction of opponent hands strictly beaten
+        beaten = (msc > osc).astype(np.float64)
+        rank_in_range = float((beaten * w).sum() / w.sum()) if w.sum() > 0 else e_show
+
+        # e_top25, e_top50
+        e_top25 = top_share_equity(res, osc, w, 0.25)
+        e_top50 = top_share_equity(res, osc, w, 0.50)
+
+        out = {
+            "e_show": float(e_show),
+            "e_now": float(e_show),
+            "ehs2": float(e_show ** 2),
+            "ppot": 0.0,
+            "npot": 0.0,
+            "e_top25": float(e_top25),
+            "e_top50": float(e_top50),
+            "rank_in_range": float(rank_in_range),
+            "block_top10": float(block_top),
+            "tex_flush": float(tex_flush),
+            "tex_straight": float(tex_straight),
+            "tex_paired": float(tex_paired),
+            "opp_disc_rank": float(opp_disc_r),
+            "p_lowest": float(p_lowest),
+        }
+        _FEATURE_CACHE[cache_key] = out
+        return out
+
+    # ------------------------------------------------------------- Turn (4 board cards)
+    if st == 4:
+        h2 = hole[:2] if len(hole) > 2 else hole
+        hands, unseen = opp_hands(h2, board, dead or [])
+        m = hands.shape[0]
+        u = unseen.size
+        b4 = np.array(board, dtype=np.int64)
+        
+        ok = (hands[:, 0:1] != unseen[None, :]) & (hands[:, 1:2] != unseen[None, :])
+        hi, ri = np.nonzero(ok)
+        
+        rows = np.empty((hi.size, 7), dtype=np.int64)
+        rows[:, 0:2] = hands[hi]
+        rows[:, 2:6] = b4
+        rows[:, 6] = unseen[ri]
+        osc = eval_batch(rows)
+        
+        mine = np.empty((u, 7), dtype=np.int64)
+        mine[:, 0:2] = np.array(h2, dtype=np.int64)
+        mine[:, 2:6] = b4
+        mine[:, 6] = unseen
+        msc = eval_batch(mine)[ri]
+        
+        res = (msc > osc).astype(np.float32) + 0.5 * (msc == osc)
+        res_mat = np.zeros((m, u), dtype=np.float32)
+        res_mat[hi, ri] = res
+        
+        # Current 6-card scores on turn board
+        my_now = eval_batch(np.concatenate([np.array([h2], dtype=np.int64), np.tile(b4, (1, 1))], axis=1))[0]
+        opp_now = eval_batch(np.concatenate([hands, np.tile(b4, (m, 1))], axis=1))
+        
+        w = np.ones(m) if opp_weights is None else opp_weights
+        w_sum = w.sum()
+        
+        # e_now and rank_in_range
+        e_now = float((((my_now > opp_now) + 0.5 * (my_now == opp_now)) * w).sum() / w_sum)
+        rank_in_range = float(((my_now > opp_now) * w).sum() / w_sum)
+        
+        # e_show
+        per_hand = np.bincount(hi, weights=res, minlength=m) / np.maximum(ok.sum(1), 1)
+        e_show = float((per_hand * w).sum() / w_sum)
+        
+        # ehs2
+        eq_by_river = (res_mat * w[:, None]).sum(axis=0) / np.maximum((ok * w[:, None]).sum(axis=0), 1e-6)
+        ehs2 = float(np.mean(eq_by_river ** 2))
+        
+        # ppot and npot
+        behind = opp_now > my_now
+        ahead = opp_now < my_now
+        
+        w_behind = (ok[behind] * w[behind, None]).sum()
+        ppot = float((res_mat[behind] * w[behind, None] * ok[behind]).sum() / w_behind) if w_behind > 0 else 0.0
+        
+        w_ahead = (ok[ahead] * w[ahead, None]).sum()
+        npot = float(((1.0 - res_mat[ahead]) * w[ahead, None] * ok[ahead]).sum() / w_ahead) if w_ahead > 0 else 0.0
+        
+        # e_top25 and e_top50
+        e_top25 = top_share_equity(per_hand, opp_now, w, 0.25)
+        e_top50 = top_share_equity(per_hand, opp_now, w, 0.50)
+        
+        out = {
+            "e_show": float(e_show),
+            "e_now": float(e_now),
+            "ehs2": float(ehs2),
+            "ppot": float(ppot),
+            "npot": float(npot),
+            "e_top25": float(e_top25),
+            "e_top50": float(e_top50),
+            "rank_in_range": float(rank_in_range),
+            "block_top10": float(block_top),
+            "tex_flush": float(tex_flush),
+            "tex_straight": float(tex_straight),
+            "tex_paired": float(tex_paired),
+            "opp_disc_rank": float(opp_disc_r),
+            "p_lowest": float(p_lowest),
+        }
+        _FEATURE_CACHE[cache_key] = out
+        return out
+
+    # ------------------------------------------------------------- Flop (3 board cards)
+    if st == 3:
+        # Hole can be 3 cards (before discard) or 2 cards (after discard)
+        if len(hole) == 3:
+            a, b, _ = cheap_keep(hole, board)
+            my_keep = np.array([a, b], dtype=np.int64)
+        else:
+            my_keep = np.array(hole[:2], dtype=np.int64)
+
+        seen = set(hole) | set(board) | set(dead or [])
+        unseen = np.array([c for c in range(52) if c not in seen], dtype=np.int64)
+        rng = np.random.default_rng(42)
+
+        N = min(120, unseen.size * (unseen.size - 1) // 2)
+        K = 40
+        
+        # Sample N opponent 3-card hands
+        opp3 = np.empty((N, 3), dtype=np.int64)
+        for i in range(N):
+            opp3[i] = rng.choice(unseen, size=3, replace=False)
+            
+        flop_tile = np.tile(np.array(board, dtype=np.int64), (N, 1))
+        opp_keep, _ = cheap_keep_batch(opp3, flop_tile)
+        
+        # Flop scores (5-card hands)
+        my_flop_score = eval_batch(np.concatenate([my_keep[None, :], np.array([board], dtype=np.int64)], axis=1))[0]
+        opp_flop_scores = eval_batch(np.concatenate([opp_keep, flop_tile], axis=1))
+        
+        e_now = float(((my_flop_score > opp_flop_scores) + 0.5 * (my_flop_score == opp_flop_scores)).mean())
+        rank_in_range = float((my_flop_score > opp_flop_scores).mean())
+        
+        # Sample K=40 runouts per hand without card clash
+        tr_runouts = np.empty((N, K, 2), dtype=np.int64)
+        for i in range(N):
+            avail = unseen[~np.isin(unseen, opp3[i])]
+            idx = rng.choice(avail.size, size=(K, 2), replace=True)
+            r_idx = idx[:, 1]
+            same = idx[:, 0] == r_idx
+            r_idx[same] = (r_idx[same] + 1) % avail.size
+            tr_runouts[i, :, 0] = avail[idx[:, 0]]
+            tr_runouts[i, :, 1] = avail[r_idx]
+            
+        tr_flat = tr_runouts.reshape((N * K, 2))
+        opp_rep = np.repeat(opp_keep, K, axis=0)
+        flop_rep = np.tile(np.array(board, dtype=np.int64), (N * K, 1))
+
+        rows_opp = np.concatenate([opp_rep, flop_rep, tr_flat], axis=1)
+        rows_mine = np.concatenate([np.tile(my_keep, (N * K, 1)), flop_rep, tr_flat], axis=1)
+
+        osc = eval_batch(rows_opp)
+        msc = eval_batch(rows_mine)
+        res = ((msc > osc).astype(np.float32) + 0.5 * (msc == osc)).reshape((N, K))
+        
+        e_show = float(res.mean())
+        
+        behind = opp_flop_scores > my_flop_score
+        ahead = opp_flop_scores < my_flop_score
+
+        ppot = float(res[behind].mean()) if behind.any() else 0.0
+        npot = float((1.0 - res[ahead]).mean()) if ahead.any() else 0.0
+
+        eq_by_runout = res.mean(axis=0)
+        ehs2 = float(np.mean(eq_by_runout ** 2))
+        
+        # e_top25 and e_top50
+        per_opp = res.mean(axis=1)
+        e_top25 = top_share_equity(per_opp, opp_flop_scores, np.ones(N), 0.25)
+        e_top50 = top_share_equity(per_opp, opp_flop_scores, np.ones(N), 0.50)
+
+        out = {
+            "e_show": float(e_show),
+            "e_now": float(e_now),
+            "ehs2": float(ehs2),
+            "ppot": float(ppot),
+            "npot": float(npot),
+            "e_top25": float(e_top25),
+            "e_top50": float(e_top50),
+            "rank_in_range": float(rank_in_range),
+            "block_top10": float(block_top),
+            "tex_flush": float(tex_flush),
+            "tex_straight": float(tex_straight),
+            "tex_paired": float(tex_paired),
+            "opp_disc_rank": float(opp_disc_r),
+            "p_lowest": float(p_lowest),
+        }
+        _FEATURE_CACHE[cache_key] = out
+        return out
+
+    # Default fallback
+    return {
+        "e_show": 0.5, "e_now": 0.5, "ehs2": 0.25, "ppot": 0.0, "npot": 0.0,
+        "e_top25": 0.3, "e_top50": 0.4, "rank_in_range": 0.5,
+        "block_top10": float(block_top), "tex_flush": float(tex_flush),
+        "tex_straight": float(tex_straight), "tex_paired": float(tex_paired),
+        "opp_disc_rank": float(opp_disc_r), "p_lowest": float(p_lowest),
+    }
+
+
 # ==================== strategy ====================
 """Decision logic. Baseline v1: table preflop, range-narrowed equity postflop,
 value-heavy betting, simulated discard, minimal opponent statistics.
@@ -1781,6 +2378,19 @@ def bet_bucket(frac):
     return 3
 
 
+def nearest_grid_idx(frac):
+    """Index of the nearest bet-size grid point in CFG['BET_GRID']."""
+    grid = CFG["BET_GRID"]
+    best_i = 0
+    best_d = abs(frac - grid[0])
+    for i in range(1, len(grid)):
+        d = abs(frac - grid[i])
+        if d < best_d:
+            best_d = d
+            best_i = i
+    return best_i
+
+
 class OppModel:
     """Per-leg statistics about the opponent (resets with the process)."""
 
@@ -1798,9 +2408,16 @@ class OppModel:
         self.opp_bet_count = [0, 0, 0, 0]
         # Fix B: response rates to our bets [fold, call, raise] per bucket
         self.our_bet_counts = [[0, 0, 0] for _ in range(4)]
+        # Bet-size grid counts (kept for features / Phase 3)
+        self.grid_counts = [[0, 0, 0] for _ in range(len(CFG.get("BET_GRID", (0.25, 0.33, 0.45, 0.60, 0.75, 1.00, 1.40))))]
         # Fix C: opponent button first-in raise tracking
         self.btn_opps = 0
         self.btn_raises = 0
+        # Discard rule posterior: [P(LOWEST), P(CHEAP), P(RANDOM)]
+        self.discard_rule_probs = [0.40, 0.40, 0.20]
+
+    def p_lowest(self):
+        return self.discard_rule_probs[0]
 
     @staticmethod
     def _freq(k, n, prior):
@@ -1857,6 +2474,41 @@ class OppModel:
                     r -= diff * (r / c_r)
         return f, c, r
 
+    def grid_response_rates(self, idx):
+        grid = CFG["BET_GRID"]
+        priors_list = CFG["BET_GRID_PRIORS"]
+        k = clamp(idx, 0, len(grid) - 1)
+        prior = priors_list[k]
+
+        nbrs = []
+        if k > 0:
+            nbrs.append(k - 1)
+        if k < len(grid) - 1:
+            nbrs.append(k + 1)
+
+        counts_k = self.grid_counts[k]
+        eff_f = counts_k[0] + 0.5 * sum(self.grid_counts[n][0] for n in nbrs)
+        eff_c = counts_k[1] + 0.5 * sum(self.grid_counts[n][1] for n in nbrs)
+        eff_r = counts_k[2] + 0.5 * sum(self.grid_counts[n][2] for n in nbrs)
+
+        w = float(CFG["EV_PRIOR_WEIGHT"])
+        denom = eff_f + eff_c + eff_r + w
+        f = (eff_f + w * prior[0]) / denom
+        c = (eff_c + w * prior[1]) / denom
+        r = (eff_r + w * prior[2]) / denom
+
+        total_obs = sum(counts_k) + sum(sum(self.grid_counts[n]) for n in nbrs)
+        if total_obs < 40:
+            f_clamped = clamp(f, prior[0] - 0.30, prior[0] + 0.30)
+            if f != f_clamped:
+                diff = f_clamped - f
+                f = f_clamped
+                c_r = c + r
+                if c_r > 0:
+                    c -= diff * (c / c_r)
+                    r -= diff * (r / c_r)
+        return f, c, r
+
     def folds_enough(self, size):
         """True when a bluff of `size` (pot fraction) is profitable on fold rate alone."""
         return (self.bets_faced >= CFG["EXPLOIT_MIN_BETS"] and
@@ -1883,6 +2535,7 @@ class OppModel:
         my_bet, opp_bet = 0, 0
         pot = 3
         last_our_bucket = None
+        last_our_grid_idx = None
 
         for e in history or []:
             st, who, act = e.get("street"), e.get("actor"), e.get("action")
@@ -1890,6 +2543,7 @@ class OppModel:
                 street, facing = st, False
                 my_bet, opp_bet = (1, 2) if my_seat == "button" else (2, 1) if st == "preflop" else (0, 0)
                 last_our_bucket = None
+                last_our_grid_idx = None
 
             amt = e.get("amount")
             if who == "me":
@@ -1898,6 +2552,7 @@ class OppModel:
                         pot_facing = max(1.0, pot - (amt - my_bet))
                         frac = (amt - opp_bet) / pot_facing
                         last_our_bucket = bet_bucket(frac)
+                        last_our_grid_idx = nearest_grid_idx(frac)
                     pot += amt - my_bet
                     my_bet = amt
                     facing = True
@@ -1907,9 +2562,11 @@ class OppModel:
                     my_bet = amt
                     facing = False
                     last_our_bucket = None
+                    last_our_grid_idx = None
                 else:
                     facing = False
                     last_our_bucket = None
+                    last_our_grid_idx = None
                 continue
 
             # who == "opp"
@@ -1932,11 +2589,15 @@ class OppModel:
                 if last_our_bucket is not None:
                     if act == "fold":
                         self.our_bet_counts[last_our_bucket][0] += 1
+                        self.grid_counts[last_our_grid_idx][0] += 1
                     elif act == "call":
                         self.our_bet_counts[last_our_bucket][1] += 1
+                        self.grid_counts[last_our_grid_idx][1] += 1
                     elif act == "raise":
                         self.our_bet_counts[last_our_bucket][2] += 1
+                        self.grid_counts[last_our_grid_idx][2] += 1
                     last_our_bucket = None
+                    last_our_grid_idx = None
                 facing = False
 
             if act == "raise" and amt is not None:
@@ -1959,6 +2620,29 @@ class OppModel:
         opp_disc_id = CARD_ID.get(opp_discard)
         opp3 = opp_hole + ([opp_disc_id] if opp_disc_id is not None else [])
         board_ids = [CARD_ID[c] for c in board if c in CARD_ID]
+
+        # Learn discard rule
+        if opp_disc_id is not None and len(opp_hole) == 2 and len(board_ids) >= 3:
+            triplet = opp_hole + [opp_disc_id]
+            low_match = (min(triplet) == opp_disc_id)
+            _, _, cheap_d = cheap_keep(triplet, board_ids[:3])
+            ch_match = (cheap_d == opp_disc_id)
+
+            l_low = 0.90 if low_match else 0.05
+            l_ch = 0.90 if ch_match else 0.05
+            l_rnd = 1.0 / 3.0
+
+            probs = [
+                self.discard_rule_probs[0] * l_low,
+                self.discard_rule_probs[1] * l_ch,
+                self.discard_rule_probs[2] * l_rnd,
+            ]
+            s = sum(probs)
+            if s > 0:
+                probs = [p / s for p in probs]
+            probs = [max(0.02, p) for p in probs]
+            s2 = sum(probs)
+            self.discard_rule_probs = [p / s2 for p in probs]
 
         my_bet, opp_bet = (1, 2) if my_seat == "button" else (2, 1)
         pot = 3
@@ -2092,6 +2776,16 @@ class Brain:
         self.hole = []              # card ids we currently hold (3, then 2)
         self.hole_str = []
         self.dead = []              # both discards once known
+        self.bayes_range = None
+        self.bayes_history_idx = 0
+        self.bayes_street = "preflop"
+        self.bayes_pf_raises = 0
+        self.bayes_my_bet = 0
+        self.bayes_opp_bet = 0
+        self.bayes_pot = 3
+        self.bayes_flop_replayed = False
+        self.my_discard = None
+        self.opp_discard = None
         self.cache = {}
         self.errors = 0
         self.notices = 0
@@ -2107,11 +2801,28 @@ class Brain:
             self.hole_str = list(msg.get("hole_cards") or [])
             self.hole = [CARD_ID[c] for c in self.hole_str]
             self.dead = []
+            self.my_discard = None
+            self.opp_discard = None
             self.cache = {}
+            if HAVE_NP and CFG.get("USE_BAYES", False):
+                self.bayes_range = BayesRange(self.opp, self.hole)
+            else:
+                self.bayes_range = None
+            self.bayes_history_idx = 0
+            self.bayes_street = "preflop"
+            self.bayes_pf_raises = 0
+            self.bayes_my_bet, self.bayes_opp_bet = (1, 2) if self.seat == "button" else (2, 1)
+            self.bayes_pot = 3
+            self.bayes_flop_replayed = False
         elif t == "discard_result":
             self.hole_str = list(msg.get("hole_cards") or self.hole_str)
             self.hole = [CARD_ID[c] for c in self.hole_str]
             self.dead = [CARD_ID[c] for c in (msg.get("my_discard"), msg.get("opp_discard")) if c in CARD_ID]
+            self.my_discard = CARD_ID.get(msg.get("my_discard"))
+            self.opp_discard = CARD_ID.get(msg.get("opp_discard"))
+            if HAVE_NP and self.bayes_range is not None and self.opp_discard is not None and "board" in self.cache:
+                board3 = [CARD_ID[c] for c in self.cache["board"][:3]]
+                self.bayes_range.init_range2(self.hole, board3, self.my_discard, self.opp_discard, self.opp.discard_rule_probs)
         elif t == "hand_result":
             self.opp.observe_hand(msg.get("history"), self.seat)
             if msg.get("opp_hole_cards"):
@@ -2122,6 +2833,102 @@ class Brain:
         elif t == "notice":
             self.notices += 1
 
+    def _update_bayes_from_history(self, history, board_cards):
+        if not HAVE_NP or self.bayes_range is None:
+            return
+        hist = history or []
+        board_ids = [CARD_ID[c] for c in board_cards if c in CARD_ID]
+
+        # Initialize Range2 if discard is known and board is available but Range2 not created yet
+        if self.bayes_range.w2 is None and self.opp_discard is not None and len(board_ids) >= 3 and len(self.hole) == 2:
+            self.bayes_range.init_range2(self.hole, board_ids[:3], self.my_discard, self.opp_discard, self.opp.discard_rule_probs)
+
+        # If Range2 is initialized and flop actions haven't been applied to Range2 yet, apply them
+        if self.bayes_range.w2 is not None and not self.bayes_flop_replayed:
+            self.bayes_flop_replayed = True
+            flop_my_bet, flop_opp_bet = 0, 0
+            flop_pot = 3
+            for e in hist:
+                st = e.get("street")
+                if st == "preflop":
+                    amt = e.get("amount")
+                    if amt is not None:
+                        flop_pot = max(flop_pot, 2 * amt)
+                elif st == "flop":
+                    act = e.get("action")
+                    who = e.get("actor")
+                    amt = e.get("amount")
+                    if who == "me":
+                        if act == "raise" and amt is not None:
+                            flop_pot += amt - flop_my_bet
+                            flop_my_bet = amt
+                        elif act == "call":
+                            amt = flop_opp_bet if amt is None else amt
+                            flop_pot += amt - flop_my_bet
+                            flop_my_bet = amt
+                    else:  # opp
+                        if act == "raise" and amt is not None:
+                            self.bayes_range.update_range2(board_ids[:3], "raise", amt - flop_opp_bet, flop_pot)
+                            flop_pot += amt - flop_opp_bet
+                            flop_opp_bet = amt
+                        elif act == "call":
+                            self.bayes_range.update_range2(board_ids[:3], "call", 0, flop_pot)
+                            amt = flop_my_bet if amt is None else amt
+                            flop_pot += amt - flop_opp_bet
+                            flop_opp_bet = amt
+                        elif act in ("check", "limp"):
+                            self.bayes_range.update_range2(board_ids[:3], "check", 0, flop_pot)
+
+        # Process new events incrementally
+        for e in hist[self.bayes_history_idx:]:
+            st, who, act = e.get("street"), e.get("actor"), e.get("action")
+            if st != self.bayes_street:
+                self.bayes_street = st
+                self.bayes_my_bet, self.bayes_opp_bet = 0, 0
+            amt = e.get("amount")
+            if who == "me":
+                if act == "raise" and amt is not None:
+                    self.bayes_pot += amt - self.bayes_my_bet
+                    self.bayes_my_bet = amt
+                    if st == "preflop":
+                        self.bayes_pf_raises += 1
+                elif act == "call":
+                    amt = self.bayes_opp_bet if amt is None else amt
+                    self.bayes_pot += amt - self.bayes_my_bet
+                    self.bayes_my_bet = amt
+                continue
+            # who == "opp"
+            if act == "raise" and amt is not None:
+                if st == "preflop":
+                    self.bayes_pf_raises += 1
+                    is_3bet = (self.bayes_pf_raises == 2)
+                    is_4bet = (self.bayes_pf_raises >= 3)
+                    self.bayes_range.update_preflop("raise", amt, is_3bet, is_4bet)
+                else:
+                    if self.bayes_range.w2 is not None and st in ("turn", "river"):
+                        st_board = board_ids[:4] if st == "turn" else board_ids[:5]
+                        self.bayes_range.update_range2(st_board, "raise", amt - self.bayes_opp_bet, self.bayes_pot)
+                self.bayes_pot += amt - self.bayes_opp_bet
+                self.bayes_opp_bet = amt
+            elif act == "call":
+                amt = self.bayes_my_bet if amt is None else amt
+                if st == "preflop":
+                    self.bayes_range.update_preflop("call")
+                else:
+                    if self.bayes_range.w2 is not None and st in ("turn", "river"):
+                        st_board = board_ids[:4] if st == "turn" else board_ids[:5]
+                        self.bayes_range.update_range2(st_board, "call", 0, self.bayes_pot)
+                self.bayes_pot += amt - self.bayes_opp_bet
+                self.bayes_opp_bet = amt
+            elif act in ("check", "limp"):
+                if st == "preflop":
+                    self.bayes_range.update_preflop("check")
+                else:
+                    if self.bayes_range.w2 is not None and st in ("turn", "river"):
+                        st_board = board_ids[:4] if st == "turn" else board_ids[:5]
+                        self.bayes_range.update_range2(st_board, "check", 0, self.bayes_pot)
+        self.bayes_history_idx = len(hist)
+
     # ---------------------------------------------------------------- equity
     def _equity(self, req, mode, x):
         """Returns (e_all, top): top(share) = equity against the strongest
@@ -2131,11 +2938,13 @@ class Brain:
         if not HAVE_NP or mode == Governor.PANIC:
             e = scalar_equity(self.hole, board, self.dead, 40)
             return e, (lambda share: max(0.0, e - (1.0 - share) * 0.30))
+        use_bayes = CFG.get("USE_BAYES", False) and self.bayes_range is not None
         if street == 3 and len(self.hole) == 3:
             sim = self.cache.get("flop")
             if sim is None:
                 n = CFG["MC_FLOP"] >> mode
-                sim = flop_equity(self.hole, board, n, self.rng)
+                opp3 = self.bayes_range.sample_opp3(n, self.rng, self.hole + board) if use_bayes else None
+                sim = flop_equity(self.hole, board, n, self.rng, opp3=opp3)
                 self.cache["flop"] = sim
             eq, key, win = sim
             w = np.ones(key.size)
@@ -2146,12 +2955,13 @@ class Brain:
         ck = "s%d" % street
         got = self.cache.get(ck)
         if got is None:
+            weights = self.bayes_range.get_weights2(board) if (use_bayes and self.bayes_range.w2 is not None) else None
             if street == 4:
                 step = (1, 2, 4)[mode]
-                e, hands, strength, res = turn_equity(self.hole, board, self.dead, None, step)
+                e, hands, strength, res = turn_equity(self.hole, board, self.dead, weights, step)
             else:
-                e, hands, strength, res = river_equity(self.hole, board, self.dead, None)
-            got = (e, strength, res, np.ones(res.size))
+                e, hands, strength, res = river_equity(self.hole, board, self.dead, weights)
+            got = (e, strength, res, weights if weights is not None else np.ones(res.size))
             self.cache[ck] = got
         e, strength, res, w = got
         return e, (lambda share: top_share_equity(res, strength, w, share))
@@ -2235,13 +3045,24 @@ class Brain:
                 ev_check = R * e_r * pot
                 best_bet = None
                 best_ev = -1e9
-                for frac in CFG["EV_BET_SIZES"]:
+                use_grid = CFG.get("USE_SIZE_GRID", False)
+                bet_sizes = CFG["BET_GRID"] if use_grid else CFG["EV_BET_SIZES"]
+                for frac in bet_sizes:
+                    if frac > 1.0:
+                        # 1.4 only when remaining stack covers it
+                        target_amt = req.get("opp_bet", 0) + frac * (req["pot"] + req.get("to_call", 0))
+                        if target_amt > req["max_raise"]:
+                            continue
                     b_action = self._bet(req, frac, e_r)
                     if b_action is None:
                         continue
                     b = b_action["amount"]
-                    bucket = bet_bucket(b / max(1.0, pot))
-                    f_b, c_b, r_b = self.opp.response_rates(bucket)
+                    if use_grid:
+                        grid_idx = nearest_grid_idx(b / max(1.0, pot))
+                        f_b, c_b, r_b = self.opp.grid_response_rates(grid_idx)
+                    else:
+                        bucket = bet_bucket(b / max(1.0, pot))
+                        f_b, c_b, r_b = self.opp.response_rates(bucket)
                     e_call_b = top(max(CFG["SHRINK_FLOOR"], x * (1.0 - f_b)))
                     if station and e_call_b < 0.50:
                         continue
@@ -2272,7 +3093,12 @@ class Brain:
         mode = self.gov.start(req, hid)
         if not self.hole:
             raise RuntimeError("no hole cards")
+        use_bayes = CFG.get("USE_BAYES", False) and HAVE_NP and mode != Governor.PANIC
         x, pf_raises = read_history(req.get("history"), self.seat, self.opp)
+        if use_bayes:
+            self._update_bayes_from_history(req.get("history"), req.get("board") or [])
+            if self.bayes_range.w2 is not None:
+                x = 1.0  # NO DOUBLE COUNTING: opponent bets already narrowed the Bayesian range
         if req.get("street") == "preflop":
             r = self._preflop(req, pf_raises)
         else:
@@ -2286,6 +3112,7 @@ class Brain:
         cards = list(req.get("hole_cards") or self.hole_str)
         ids3 = [CARD_ID[c] for c in cards]
         flop = [CARD_ID[c] for c in (req.get("board") or [])[:3]]
+        self.cache["board"] = list(req.get("board") or [])
         if HAVE_NP and mode != Governor.PANIC:
             self.hole, self.hole_str = ids3, cards
             if "keep" not in self.cache:

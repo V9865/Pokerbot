@@ -72,7 +72,8 @@ if HAVE_NP:
         msc = eval7(list(hole2) + list(board5))
         res = (msc > osc) + 0.5 * (msc == osc)
         w = np.ones(m) if weights is None else weights
-        return float((res * w).sum() / w.sum()), hands, osc, res
+        w_sum = w.sum()
+        return float((res * w).sum() / (w_sum if w_sum > 0 else 1.0)), hands, osc, res
 
     def turn_equity(hole2, board4, dead, weights=None, river_step=1):
         """Exact over all opponent hands and river cards (river_step > 1 uses
@@ -100,20 +101,23 @@ if HAVE_NP:
         per_hand = np.bincount(hi, weights=res, minlength=m) / np.maximum(ok.sum(1), 1)
         opp_now = eval_batch(np.concatenate([hands, np.tile(b4, (m, 1))], axis=1))
         w = np.ones(m) if weights is None else weights
-        return float((per_hand * w).sum() / w.sum()), hands, opp_now, per_hand
+        w_sum = w.sum()
+        return float((per_hand * w).sum() / (w_sum if w_sum > 0 else 1.0)), hands, opp_now, per_hand
 
     def top_share_equity(result, strength, weights, share):
         """Equity against only the strongest `share` (by weight) of the range.
         result: our outcome vs each hand/sample; strength: opponent strength."""
-        if share >= 0.999:
-            return float((result * weights).sum() / weights.sum())
+        w_sum = weights.sum()
+        if share >= 0.999 or w_sum <= 0:
+            return float((result * weights).sum() / (w_sum if w_sum > 0 else 1.0))
         order = np.argsort(-strength, kind="stable")
         w = weights[order]
         cum = np.cumsum(w)
         cut = share * cum[-1]
         k = int(np.searchsorted(cum, cut)) + 1
         k = max(1, min(k, w.size))
-        return float((result[order][:k] * w[:k]).sum() / w[:k].sum())
+        k_sum = w[:k].sum()
+        return float((result[order][:k] * w[:k]).sum() / (k_sum if k_sum > 0 else 1.0))
 
 
 def scalar_equity(hole, board, dead, n, rnd=random):

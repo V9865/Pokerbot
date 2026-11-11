@@ -12,6 +12,7 @@ if HAVE_NP:
     import numpy as np
     from evaluator import eval_batch
     from equity import flop_equity, turn_equity, river_equity, top_share_equity
+    from ranges import BayesRange
 
 KEEPS = ((0, 1, 2), (0, 2, 1), (1, 2, 0))      # (keep, keep, discard) indices
 
@@ -32,6 +33,19 @@ def bet_bucket(frac):
     return 3
 
 
+def nearest_grid_idx(frac):
+    """Index of the nearest bet-size grid point in CFG['BET_GRID']."""
+    grid = CFG["BET_GRID"]
+    best_i = 0
+    best_d = abs(frac - grid[0])
+    for i in range(1, len(grid)):
+        d = abs(frac - grid[i])
+        if d < best_d:
+            best_d = d
+            best_i = i
+    return best_i
+
+
 class OppModel:
     """Per-leg statistics about the opponent (resets with the process)."""
 
@@ -49,9 +63,16 @@ class OppModel:
         self.opp_bet_count = [0, 0, 0, 0]
         # Fix B: response rates to our bets [fold, call, raise] per bucket
         self.our_bet_counts = [[0, 0, 0] for _ in range(4)]
+        # Bet-size grid counts (kept for features / Phase 3)
+        self.grid_counts = [[0, 0, 0] for _ in range(len(CFG.get("BET_GRID", (0.25, 0.33, 0.45, 0.60, 0.75, 1.00, 1.40))))]
         # Fix C: opponent button first-in raise tracking
         self.btn_opps = 0
         self.btn_raises = 0
+        # Discard rule posterior: [P(LOWEST), P(CHEAP), P(RANDOM)]
+        self.discard_rule_probs = [0.40, 0.40, 0.20]
+
+    def p_lowest(self):
+        return self.discard_rule_probs[0]
 
     @staticmethod
     def _freq(k, n, prior):
@@ -108,6 +129,41 @@ class OppModel:
                     r -= diff * (r / c_r)
         return f, c, r
 
+    def grid_response_rates(self, idx):
+        grid = CFG["BET_GRID"]
+        priors_list = CFG["BET_GRID_PRIORS"]
+        k = clamp(idx, 0, len(grid) - 1)
+        prior = priors_list[k]
+
+        nbrs = []
+        if k > 0:
+            nbrs.append(k - 1)
+        if k < len(grid) - 1:
+            nbrs.append(k + 1)
+
+        counts_k = self.grid_counts[k]
+        eff_f = counts_k[0] + 0.5 * sum(self.grid_counts[n][0] for n in nbrs)
+        eff_c = counts_k[1] + 0.5 * sum(self.grid_counts[n][1] for n in nbrs)
+        eff_r = counts_k[2] + 0.5 * sum(self.grid_counts[n][2] for n in nbrs)
+
+        w = float(CFG["EV_PRIOR_WEIGHT"])
+        denom = eff_f + eff_c + eff_r + w
+        f = (eff_f + w * prior[0]) / denom
+        c = (eff_c + w * prior[1]) / denom
+        r = (eff_r + w * prior[2]) / denom
+
+        total_obs = sum(counts_k) + sum(sum(self.grid_counts[n]) for n in nbrs)
+        if total_obs < 40:
+            f_clamped = clamp(f, prior[0] - 0.30, prior[0] + 0.30)
+            if f != f_clamped:
+                diff = f_clamped - f
+                f = f_clamped
+                c_r = c + r
+                if c_r > 0:
+                    c -= diff * (c / c_r)
+                    r -= diff * (r / c_r)
+        return f, c, r
+
     def folds_enough(self, size):
         """True when a bluff of `size` (pot fraction) is profitable on fold rate alone."""
         return (self.bets_faced >= CFG["EXPLOIT_MIN_BETS"] and
@@ -134,6 +190,7 @@ class OppModel:
         my_bet, opp_bet = 0, 0
         pot = 3
         last_our_bucket = None
+        last_our_grid_idx = None
 
         for e in history or []:
             st, who, act = e.get("street"), e.get("actor"), e.get("action")
@@ -141,6 +198,7 @@ class OppModel:
                 street, facing = st, False
                 my_bet, opp_bet = (1, 2) if my_seat == "button" else (2, 1) if st == "preflop" else (0, 0)
                 last_our_bucket = None
+                last_our_grid_idx = None
 
             amt = e.get("amount")
             if who == "me":
@@ -149,6 +207,7 @@ class OppModel:
                         pot_facing = max(1.0, pot - (amt - my_bet))
                         frac = (amt - opp_bet) / pot_facing
                         last_our_bucket = bet_bucket(frac)
+                        last_our_grid_idx = nearest_grid_idx(frac)
                     pot += amt - my_bet
                     my_bet = amt
                     facing = True
@@ -158,9 +217,11 @@ class OppModel:
                     my_bet = amt
                     facing = False
                     last_our_bucket = None
+                    last_our_grid_idx = None
                 else:
                     facing = False
                     last_our_bucket = None
+                    last_our_grid_idx = None
                 continue
 
             # who == "opp"
@@ -183,11 +244,15 @@ class OppModel:
                 if last_our_bucket is not None:
                     if act == "fold":
                         self.our_bet_counts[last_our_bucket][0] += 1
+                        self.grid_counts[last_our_grid_idx][0] += 1
                     elif act == "call":
                         self.our_bet_counts[last_our_bucket][1] += 1
+                        self.grid_counts[last_our_grid_idx][1] += 1
                     elif act == "raise":
                         self.our_bet_counts[last_our_bucket][2] += 1
+                        self.grid_counts[last_our_grid_idx][2] += 1
                     last_our_bucket = None
+                    last_our_grid_idx = None
                 facing = False
 
             if act == "raise" and amt is not None:
@@ -210,6 +275,29 @@ class OppModel:
         opp_disc_id = CARD_ID.get(opp_discard)
         opp3 = opp_hole + ([opp_disc_id] if opp_disc_id is not None else [])
         board_ids = [CARD_ID[c] for c in board if c in CARD_ID]
+
+        # Learn discard rule
+        if opp_disc_id is not None and len(opp_hole) == 2 and len(board_ids) >= 3:
+            triplet = opp_hole + [opp_disc_id]
+            low_match = (min(triplet) == opp_disc_id)
+            _, _, cheap_d = cheap_keep(triplet, board_ids[:3])
+            ch_match = (cheap_d == opp_disc_id)
+
+            l_low = 0.90 if low_match else 0.05
+            l_ch = 0.90 if ch_match else 0.05
+            l_rnd = 1.0 / 3.0
+
+            probs = [
+                self.discard_rule_probs[0] * l_low,
+                self.discard_rule_probs[1] * l_ch,
+                self.discard_rule_probs[2] * l_rnd,
+            ]
+            s = sum(probs)
+            if s > 0:
+                probs = [p / s for p in probs]
+            probs = [max(0.02, p) for p in probs]
+            s2 = sum(probs)
+            self.discard_rule_probs = [p / s2 for p in probs]
 
         my_bet, opp_bet = (1, 2) if my_seat == "button" else (2, 1)
         pot = 3
@@ -343,6 +431,16 @@ class Brain:
         self.hole = []              # card ids we currently hold (3, then 2)
         self.hole_str = []
         self.dead = []              # both discards once known
+        self.bayes_range = None
+        self.bayes_history_idx = 0
+        self.bayes_street = "preflop"
+        self.bayes_pf_raises = 0
+        self.bayes_my_bet = 0
+        self.bayes_opp_bet = 0
+        self.bayes_pot = 3
+        self.bayes_flop_replayed = False
+        self.my_discard = None
+        self.opp_discard = None
         self.cache = {}
         self.errors = 0
         self.notices = 0
@@ -358,11 +456,28 @@ class Brain:
             self.hole_str = list(msg.get("hole_cards") or [])
             self.hole = [CARD_ID[c] for c in self.hole_str]
             self.dead = []
+            self.my_discard = None
+            self.opp_discard = None
             self.cache = {}
+            if HAVE_NP and CFG.get("USE_BAYES", False):
+                self.bayes_range = BayesRange(self.opp, self.hole)
+            else:
+                self.bayes_range = None
+            self.bayes_history_idx = 0
+            self.bayes_street = "preflop"
+            self.bayes_pf_raises = 0
+            self.bayes_my_bet, self.bayes_opp_bet = (1, 2) if self.seat == "button" else (2, 1)
+            self.bayes_pot = 3
+            self.bayes_flop_replayed = False
         elif t == "discard_result":
             self.hole_str = list(msg.get("hole_cards") or self.hole_str)
             self.hole = [CARD_ID[c] for c in self.hole_str]
             self.dead = [CARD_ID[c] for c in (msg.get("my_discard"), msg.get("opp_discard")) if c in CARD_ID]
+            self.my_discard = CARD_ID.get(msg.get("my_discard"))
+            self.opp_discard = CARD_ID.get(msg.get("opp_discard"))
+            if HAVE_NP and self.bayes_range is not None and self.opp_discard is not None and "board" in self.cache:
+                board3 = [CARD_ID[c] for c in self.cache["board"][:3]]
+                self.bayes_range.init_range2(self.hole, board3, self.my_discard, self.opp_discard, self.opp.discard_rule_probs)
         elif t == "hand_result":
             self.opp.observe_hand(msg.get("history"), self.seat)
             if msg.get("opp_hole_cards"):
@@ -373,6 +488,102 @@ class Brain:
         elif t == "notice":
             self.notices += 1
 
+    def _update_bayes_from_history(self, history, board_cards):
+        if not HAVE_NP or self.bayes_range is None:
+            return
+        hist = history or []
+        board_ids = [CARD_ID[c] for c in board_cards if c in CARD_ID]
+
+        # Initialize Range2 if discard is known and board is available but Range2 not created yet
+        if self.bayes_range.w2 is None and self.opp_discard is not None and len(board_ids) >= 3 and len(self.hole) == 2:
+            self.bayes_range.init_range2(self.hole, board_ids[:3], self.my_discard, self.opp_discard, self.opp.discard_rule_probs)
+
+        # If Range2 is initialized and flop actions haven't been applied to Range2 yet, apply them
+        if self.bayes_range.w2 is not None and not self.bayes_flop_replayed:
+            self.bayes_flop_replayed = True
+            flop_my_bet, flop_opp_bet = 0, 0
+            flop_pot = 3
+            for e in hist:
+                st = e.get("street")
+                if st == "preflop":
+                    amt = e.get("amount")
+                    if amt is not None:
+                        flop_pot = max(flop_pot, 2 * amt)
+                elif st == "flop":
+                    act = e.get("action")
+                    who = e.get("actor")
+                    amt = e.get("amount")
+                    if who == "me":
+                        if act == "raise" and amt is not None:
+                            flop_pot += amt - flop_my_bet
+                            flop_my_bet = amt
+                        elif act == "call":
+                            amt = flop_opp_bet if amt is None else amt
+                            flop_pot += amt - flop_my_bet
+                            flop_my_bet = amt
+                    else:  # opp
+                        if act == "raise" and amt is not None:
+                            self.bayes_range.update_range2(board_ids[:3], "raise", amt - flop_opp_bet, flop_pot)
+                            flop_pot += amt - flop_opp_bet
+                            flop_opp_bet = amt
+                        elif act == "call":
+                            self.bayes_range.update_range2(board_ids[:3], "call", 0, flop_pot)
+                            amt = flop_my_bet if amt is None else amt
+                            flop_pot += amt - flop_opp_bet
+                            flop_opp_bet = amt
+                        elif act in ("check", "limp"):
+                            self.bayes_range.update_range2(board_ids[:3], "check", 0, flop_pot)
+
+        # Process new events incrementally
+        for e in hist[self.bayes_history_idx:]:
+            st, who, act = e.get("street"), e.get("actor"), e.get("action")
+            if st != self.bayes_street:
+                self.bayes_street = st
+                self.bayes_my_bet, self.bayes_opp_bet = 0, 0
+            amt = e.get("amount")
+            if who == "me":
+                if act == "raise" and amt is not None:
+                    self.bayes_pot += amt - self.bayes_my_bet
+                    self.bayes_my_bet = amt
+                    if st == "preflop":
+                        self.bayes_pf_raises += 1
+                elif act == "call":
+                    amt = self.bayes_opp_bet if amt is None else amt
+                    self.bayes_pot += amt - self.bayes_my_bet
+                    self.bayes_my_bet = amt
+                continue
+            # who == "opp"
+            if act == "raise" and amt is not None:
+                if st == "preflop":
+                    self.bayes_pf_raises += 1
+                    is_3bet = (self.bayes_pf_raises == 2)
+                    is_4bet = (self.bayes_pf_raises >= 3)
+                    self.bayes_range.update_preflop("raise", amt, is_3bet, is_4bet)
+                else:
+                    if self.bayes_range.w2 is not None and st in ("turn", "river"):
+                        st_board = board_ids[:4] if st == "turn" else board_ids[:5]
+                        self.bayes_range.update_range2(st_board, "raise", amt - self.bayes_opp_bet, self.bayes_pot)
+                self.bayes_pot += amt - self.bayes_opp_bet
+                self.bayes_opp_bet = amt
+            elif act == "call":
+                amt = self.bayes_my_bet if amt is None else amt
+                if st == "preflop":
+                    self.bayes_range.update_preflop("call")
+                else:
+                    if self.bayes_range.w2 is not None and st in ("turn", "river"):
+                        st_board = board_ids[:4] if st == "turn" else board_ids[:5]
+                        self.bayes_range.update_range2(st_board, "call", 0, self.bayes_pot)
+                self.bayes_pot += amt - self.bayes_opp_bet
+                self.bayes_opp_bet = amt
+            elif act in ("check", "limp"):
+                if st == "preflop":
+                    self.bayes_range.update_preflop("check")
+                else:
+                    if self.bayes_range.w2 is not None and st in ("turn", "river"):
+                        st_board = board_ids[:4] if st == "turn" else board_ids[:5]
+                        self.bayes_range.update_range2(st_board, "check", 0, self.bayes_pot)
+        self.bayes_history_idx = len(hist)
+
     # ---------------------------------------------------------------- equity
     def _equity(self, req, mode, x):
         """Returns (e_all, top): top(share) = equity against the strongest
@@ -382,11 +593,13 @@ class Brain:
         if not HAVE_NP or mode == Governor.PANIC:
             e = scalar_equity(self.hole, board, self.dead, 40)
             return e, (lambda share: max(0.0, e - (1.0 - share) * 0.30))
+        use_bayes = CFG.get("USE_BAYES", False) and self.bayes_range is not None
         if street == 3 and len(self.hole) == 3:
             sim = self.cache.get("flop")
             if sim is None:
                 n = CFG["MC_FLOP"] >> mode
-                sim = flop_equity(self.hole, board, n, self.rng)
+                opp3 = self.bayes_range.sample_opp3(n, self.rng, self.hole + board) if use_bayes else None
+                sim = flop_equity(self.hole, board, n, self.rng, opp3=opp3)
                 self.cache["flop"] = sim
             eq, key, win = sim
             w = np.ones(key.size)
@@ -397,12 +610,13 @@ class Brain:
         ck = "s%d" % street
         got = self.cache.get(ck)
         if got is None:
+            weights = self.bayes_range.get_weights2(board) if (use_bayes and self.bayes_range.w2 is not None) else None
             if street == 4:
                 step = (1, 2, 4)[mode]
-                e, hands, strength, res = turn_equity(self.hole, board, self.dead, None, step)
+                e, hands, strength, res = turn_equity(self.hole, board, self.dead, weights, step)
             else:
-                e, hands, strength, res = river_equity(self.hole, board, self.dead, None)
-            got = (e, strength, res, np.ones(res.size))
+                e, hands, strength, res = river_equity(self.hole, board, self.dead, weights)
+            got = (e, strength, res, weights if weights is not None else np.ones(res.size))
             self.cache[ck] = got
         e, strength, res, w = got
         return e, (lambda share: top_share_equity(res, strength, w, share))
@@ -486,13 +700,24 @@ class Brain:
                 ev_check = R * e_r * pot
                 best_bet = None
                 best_ev = -1e9
-                for frac in CFG["EV_BET_SIZES"]:
+                use_grid = CFG.get("USE_SIZE_GRID", False)
+                bet_sizes = CFG["BET_GRID"] if use_grid else CFG["EV_BET_SIZES"]
+                for frac in bet_sizes:
+                    if frac > 1.0:
+                        # 1.4 only when remaining stack covers it
+                        target_amt = req.get("opp_bet", 0) + frac * (req["pot"] + req.get("to_call", 0))
+                        if target_amt > req["max_raise"]:
+                            continue
                     b_action = self._bet(req, frac, e_r)
                     if b_action is None:
                         continue
                     b = b_action["amount"]
-                    bucket = bet_bucket(b / max(1.0, pot))
-                    f_b, c_b, r_b = self.opp.response_rates(bucket)
+                    if use_grid:
+                        grid_idx = nearest_grid_idx(b / max(1.0, pot))
+                        f_b, c_b, r_b = self.opp.grid_response_rates(grid_idx)
+                    else:
+                        bucket = bet_bucket(b / max(1.0, pot))
+                        f_b, c_b, r_b = self.opp.response_rates(bucket)
                     e_call_b = top(max(CFG["SHRINK_FLOOR"], x * (1.0 - f_b)))
                     if station and e_call_b < 0.50:
                         continue
@@ -523,7 +748,12 @@ class Brain:
         mode = self.gov.start(req, hid)
         if not self.hole:
             raise RuntimeError("no hole cards")
+        use_bayes = CFG.get("USE_BAYES", False) and HAVE_NP and mode != Governor.PANIC
         x, pf_raises = read_history(req.get("history"), self.seat, self.opp)
+        if use_bayes:
+            self._update_bayes_from_history(req.get("history"), req.get("board") or [])
+            if self.bayes_range.w2 is not None:
+                x = 1.0  # NO DOUBLE COUNTING: opponent bets already narrowed the Bayesian range
         if req.get("street") == "preflop":
             r = self._preflop(req, pf_raises)
         else:
@@ -537,6 +767,7 @@ class Brain:
         cards = list(req.get("hole_cards") or self.hole_str)
         ids3 = [CARD_ID[c] for c in cards]
         flop = [CARD_ID[c] for c in (req.get("board") or [])[:3]]
+        self.cache["board"] = list(req.get("board") or [])
         if HAVE_NP and mode != Governor.PANIC:
             self.hole, self.hole_str = ids3, cards
             if "keep" not in self.cache:

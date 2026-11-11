@@ -10,7 +10,7 @@ Never upload a variant; change src\config.py and rebuild dist\bot.py instead.
 """
 import ast, os, re, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ORDER = ["config", "cards", "evaluator", "preflop_table", "safety", "equity", "strategy", "main"]
+ORDER = ["config", "cards", "evaluator", "preflop_table", "safety", "equity", "ranges", "features", "strategy", "main"]
 # add new modules to ORDER after everything they import (e.g. "ranges", "opponent" before "strategy")
 FORBIDDEN = ["socket", "subprocess", "threading", "multiprocessing", "os.system", "urllib", "requests", "open("]
 

@@ -19,6 +19,10 @@ bot-safety. Use Plan mode: show the plan and wait for approval.
    preflop policy (section 3). Pure functions of (features, situation,
    opponent features, PARAMS, rng) returning an action dict. Vectorised where
    it matters; under 5 ms per decision.
+   NOTE: Bet-size choice must include a multi-street value term (expected future
+   bets when called, e.g. learned weight x pot growth on flop and turn) and must
+   not be pure argmax during training (softmax with learned temperature over the
+   candidate sizes {0.25, 0.33, 0.45, 0.60, 0.75, 1.00, 1.40}).
 4. strategy.py: config switch POLICY = "learned" | "v1". "learned" calls
    policy.py; "v1" keeps the old code path (also the PANIC-mode fallback).
 5. tools\bundle.py: add --params FILE.json (override PARAMS in a variant;

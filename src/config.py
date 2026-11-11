@@ -32,9 +32,21 @@ CFG = {
     "BLUFF_FLOP": 0.12, "BLUFF_TURN": 0.06, "BLUFF_RIVER": 0.04,
     "BLUFF_MAX_EQ": 0.40,       # only bluff hands below this equity
     "BLUFF_SIZE": 0.60,
-    "EV_BET_SIZES": (0.33, 0.50, 0.75, 1.0), # candidate pot fractions when betting by EV
+    "USE_SIZE_GRID": False,     # if False, decisions use v1.1 4-bucket sizing; grid counts kept as features
+    "EV_BET_SIZES": (0.33, 0.50, 0.75, 1.0), # candidate pot fractions when betting by EV in v1.1
+    "BET_GRID": (0.25, 0.33, 0.45, 0.60, 0.75, 1.00, 1.40),
+    "BET_GRID_PRIORS": (
+        (0.25, 0.65, 0.10),
+        (0.30, 0.60, 0.10),
+        (0.40, 0.50, 0.10),
+        (0.45, 0.46, 0.09),
+        (0.50, 0.42, 0.08),
+        (0.55, 0.40, 0.05),
+        (0.60, 0.38, 0.02),
+    ),
     "EV_PRIOR_WEIGHT": 8,       # prior weight for learning fold/call/raise rates to our bets
     "EV_MIX_MARGIN": 0.03,      # river mix threshold: mix 50/50 if best bet beats check by < this * pot
+    "USE_BAYES": True,          # switch for Bayesian opponent ranges (Phase 2 Step 2)
     # range narrowing: share of their range kept (strongest first) after each of their actions
     "SHRINK_PF_RAISE": 0.85, "SHRINK_PF_3BET": 0.50, "SHRINK_PF_4BET": 0.35,
     "SHRINK_BET_SMALL": 0.75, "SHRINK_BET_MED": 0.60, "SHRINK_BET_LARGE": 0.50, "SHRINK_BET_OVER": 0.40,

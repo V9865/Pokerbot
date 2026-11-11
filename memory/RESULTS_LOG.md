@@ -183,10 +183,86 @@ Log analysis via `tools/analyze_log.py`:
 ## 2026-11-11 Re-run of Friend Bot (Fixed Seeds 1-20, Apples-to-Apples Comparison)
 Ran on final committed v1.1 `dist/bot.py` across identical seed lists:
 - **Stage 1 (400 hands/match, 200/leg, seeds 1-20)**: `runs/friend_s1_20/results.csv`
-  * Record: **16-0-4**, **+1.02 +- 0.48 chips/hand** (capped +0.67)
+  * Record: **16-0-4**, **+1.02 +- 0.48 chips/hand** (capped +0.58)
   * Seeds 1-10: **9-0-1** (only seed 6 lost: -0.59 chips/hand)
 - **Stage 2 (1,000 hands/match, 500/leg, seeds 1-20)**: `runs/friend_s2_20_final/results.csv`
-  * Record: **18-0-2**, **+1.20 +- 0.31 chips/hand** (capped +0.81)
+  * Record: **18-0-2**, **+1.20 +- 0.31 chips/hand** (capped +0.82)
   * Seeds 1-10: **10-0-0** (all 10 seeds won!)
   * Seeds 11-20: 8-0-2 (minor losses on seed 11: -0.19, seed 17: -0.09)
+
+
+## 2026-11-11 Phase 2 Step 2: Bayesian Opponent Ranges (v2 Bot)
+- **v2 Bot**: `dist/bot.py` = `snapshots/v2_bot.py` (`USE_BAYES = True`, `USE_SIZE_GRID = False`)
+- **Baseline**: `snapshots/v1_1_bot.py` (commit `b277b76`)
+- Runs: `runs/v2_zoo_s1` (v2 Stage 1), `runs/v2_zoo_s2` (v2 Stage 2), `runs/h2h_bayes_vs_v11` (Head-to-head 40 seeds), `runs/v2_friend_s1_20` (Friend S1), `runs/v2_friend_s2_20` (Friend S2).
+
+### Head-to-Head Regression Gate vs v1_1 (seeds 1-40, Stage 2)
+Command: `py -3.11 tools/run_matches.py --bot snapshots/v2_bot.py --opps snapshots/v1_1_bot.py --seeds 1-40 --stage 2 --jobs 8 --tag h2h_bayes_vs_v11`
+```
+opponent             n     W-D-L chips/hand   95% CI   capped  time s problems
+v1_1_bot            40   18-0-22      -0.10   +-0.20    -0.09    63.0        0
+```
+Gate criteria: wins >= losses or within CI of even (-0.10 is well within +-0.20 CI). 0 errors, 0 notices, 0 forfeits. PASS.
+
+### Held-Out Check: Friend Bot (seeds 1-20, Stage 1 & Stage 2)
+- **Stage 1 (400 hands/match, 200/leg, seeds 1-20)**:
+  * v2: **18-0-2**, **+1.07 +- 0.51 chips/hand** (capped **+0.61**)
+  * v1.1: **16-0-4**, **+1.02 +- 0.48 chips/hand** (capped **+0.58**)
+  * Gain vs v1.1: **+0.05 +- 0.70 chips/hand** (capped gain: **+0.03**, wins: +2). PASS.
+- **Stage 2 (1,000 hands/match, 500/leg, seeds 1-20)**:
+  * v2: **19-0-1**, **+1.40 +- 0.33 chips/hand** (capped **+0.88**)
+  * v1.1: **18-0-2**, **+1.20 +- 0.31 chips/hand** (capped **+0.82**)
+  * Gain vs v1.1: **+0.20 +- 0.45 chips/hand** (capped gain: **+0.06**, wins: +1). PASS.
+
+### Stage 1 Full Zoo (400 hands/match, seeds 1-10)
+```
+opponent         W-D-L(v2)  chips(v2)  95% CI   cap(v2)  | W-D-L(v1.1)  chips(v1.1)  95% CI   cap(v1.1) | gain    gain CI 
+station          10-0-0         +24.85 +- 1.36    +1.00 | 10-0-0             +22.93 +- 1.59     +1.00 |   +1.92 +- 2.09
+random_bot       10-0-0         +16.75 +- 1.28    +1.00 | 10-0-0             +11.50 +- 1.44     +1.00 |   +5.26 +- 1.93
+shover           10-0-0         +22.48 +- 2.60    +1.00 | 10-0-0             +22.93 +- 2.17     +1.00 |   -0.45 +- 3.38
+maniac           10-0-0         +28.14 +- 2.54    +1.00 | 10-0-0             +33.32 +- 1.94     +1.00 |   -5.18 +- 3.20
+nit              10-0-0          +1.72 +- 0.70    +0.83 | 9-0-1               +1.00 +- 0.62     +0.57 |   +0.72 +- 0.93
+minraiser        10-0-0         +29.26 +- 1.84    +1.00 | 10-0-0             +28.53 +- 4.00     +1.00 |   +0.73 +- 4.41
+ai_typical       10-0-0         +13.22 +- 0.80    +1.00 | 10-0-0              +9.56 +- 1.48     +1.00 |   +3.66 +- 1.69
+ai_typical_v2    10-0-0          +9.36 +- 1.61    +1.00 | 10-0-0              +7.56 +- 1.19     +1.00 |   +1.79 +- 2.01
+gto_like         9-0-1           +1.65 +- 0.96    +0.76 | 10-0-0              +2.91 +- 0.93     +0.93 |   -1.27 +- 1.34
+raise_or_fold    10-0-0          +2.59 +- 0.73    +1.00 | 10-0-0              +2.19 +- 0.89     +0.87 |   +0.40 +- 1.15
+rof_tight        9-0-1           +2.40 +- 0.72    +0.83 | 10-0-0              +2.27 +- 0.61     +0.91 |   +0.12 +- 0.94
+rof_loose        10-0-0          +2.45 +- 0.93    +0.98 | 10-0-0              +3.14 +- 0.74     +1.00 |   -0.70 +- 1.19
+rof_big          10-0-0          +4.75 +- 1.28    +1.00 | 10-0-0              +4.82 +- 1.26     +1.00 |   -0.07 +- 1.79
+rof_small        10-0-0          +3.67 +- 0.79    +1.00 | 9-0-1               +2.13 +- 1.04     +0.68 |   +1.54 +- 1.30
+liar             10-0-0          +4.85 +- 1.02    +1.00 | 10-0-0              +3.99 +- 0.82     +1.00 |   +0.86 +- 1.31
+friend           8-0-2           +1.66 +- 0.88    +0.66 | 7-0-3               +1.35 +- 1.18     +0.44 |   +0.32 +- 1.47
+```
+Total Stage 1: 156-0-4 (97.5% win rate). Problems: 0.
+
+### Stage 2 Full Zoo (1,000 hands/match, seeds 1-10)
+```
+opponent         W-D-L(v2)  chips(v2)  95% CI   cap(v2)  | W-D-L(v1.1)  chips(v1.1)  95% CI   cap(v1.1) | gain    gain CI 
+station          10-0-0         +23.88 +- 1.01    +1.00 | 10-0-0             +22.68 +- 0.82     +1.00 |   +1.20 +- 1.30
+random_bot       10-0-0         +16.95 +- 1.43    +1.00 | 10-0-0             +10.12 +- 0.94     +1.00 |   +6.83 +- 1.71
+shover           10-0-0         +22.85 +- 2.07    +1.00 | 10-0-0             +23.31 +- 2.30     +1.00 |   -0.46 +- 3.10
+maniac           10-0-0         +28.61 +- 1.56    +1.00 | 10-0-0             +33.53 +- 1.45     +1.00 |   -4.92 +- 2.13
+nit              10-0-0          +1.76 +- 0.72    +0.94 | 10-0-0              +1.21 +- 0.52     +0.75 |   +0.55 +- 0.89
+minraiser        10-0-0         +30.60 +- 1.76    +1.00 | 10-0-0             +28.50 +- 2.82     +1.00 |   +2.09 +- 3.33
+ai_typical       10-0-0         +13.31 +- 0.95    +1.00 | 10-0-0             +10.30 +- 0.69     +1.00 |   +3.02 +- 1.18
+ai_typical_v2    10-0-0          +9.01 +- 0.78    +1.00 | 10-0-0              +6.62 +- 0.63     +1.00 |   +2.39 +- 1.01
+gto_like         10-0-0          +2.48 +- 0.48    +1.00 | 10-0-0              +1.94 +- 0.62     +0.92 |   +0.55 +- 0.78
+raise_or_fold    10-0-0          +2.64 +- 0.57    +1.00 | 10-0-0              +2.12 +- 0.64     +0.95 |   +0.52 +- 0.86
+rof_tight        9-0-1           +2.27 +- 0.92    +0.80 | 10-0-0              +1.74 +- 0.77     +0.88 |   +0.53 +- 1.19
+rof_loose        10-0-0          +3.18 +- 0.47    +1.00 | 9-0-1               +2.02 +- 0.84     +0.83 |   +1.16 +- 0.96
+rof_big          10-0-0          +4.77 +- 0.32    +1.00 | 10-0-0              +3.51 +- 0.60     +1.00 |   +1.25 +- 0.68
+rof_small        10-0-0          +3.73 +- 0.75    +1.00 | 10-0-0              +1.72 +- 0.80     +0.79 |   +2.01 +- 1.10
+liar             10-0-0          +6.17 +- 0.75    +1.00 | 10-0-0              +4.59 +- 0.71     +1.00 |   +1.58 +- 1.03
+friend           10-0-0          +1.26 +- 0.44    +0.83 | 10-0-0              +1.66 +- 0.50     +0.91 |   -0.40 +- 0.67
+```
+Total Stage 2: 159-0-1 (99.4% win rate). Problems: 0.
+Notable highlights:
+- `rof_small`: +3.73 chips/hand (capped +1.00), regaining and exceeding v1's +3.16 (+2.01 gain vs v1.1).
+- `random_bot`: +16.95 chips/hand (+6.83 gain vs v1.1).
+- `ai_typical` & `ai_typical_v2`: massive gains (+3.02 and +2.39 chips/hand).
+- `liar`: +6.17 chips/hand (+1.58 gain vs v1.1).
+- `rof_big`: +4.77 chips/hand (+1.25 gain vs v1.1).
+- `gto_like`: +2.48 chips/hand (capped +1.00 vs +0.92).
+
 

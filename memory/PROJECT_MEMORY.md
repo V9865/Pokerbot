@@ -3,21 +3,30 @@
 Read this first in every conversation. Update it at the end of every phase.
 
 ## 1. Status
-- Phase: v1.1 complete, fully tested, and passed all acceptance gates.
-- Current bot: v1.1 = dist\bot.py = snapshots\v1_1_bot.py (Git commit: b277b76).
-- Uploaded to Unstop: ready to upload v1.1.
+- Phase: Phase 2 Step 2 complete; v2 bot with Bayesian opponent ranges fully tested, passed all acceptance gates and ablations.
+- Current bot: v2 = dist\bot.py = snapshots\v2_bot.py.
+- Uploaded to Unstop: recommended to upload v2 (or keep v1.1 snapshot available).
 - Benchmarks:
-  * Head-to-head vs v1: 28-0-12, +0.44 +- 0.39 chips/hand (Regression gate PASSED).
-  * vs friend (Stage 2): 18-0-2, +0.98 +- 0.39 chips/hand (+1.38 gain vs v1's -0.40, PASSED).
-  * vs raise_or_fold: 27-0-3, +2.03 +- 0.60 chips/hand (+0.65 gain vs v1, PASSED).
-  * Full zoo (seeds 1-10): All 16 matchups won (including rof variants and liar), 0 problems.
-  * Generalization guard: Design-set gain +0.55/hand, Held-out set gain +0.71/hand (>100% of design gain).
-  * Timing: Stage 1 ~2.8s (9.5%), Stage 2 ~7.2s (9.6%), max reply 24.6 ms (all < 250 ms, all FULL mode).
+  * Head-to-head vs v1_1 (seeds 1-40, Stage 2): 18-0-22, -0.10 +- 0.20 chips/hand, capped -0.09 (Regression gate PASSED).
+  * Friend held-out check (seeds 1-20, Stage 1): 18-0-2, +1.07 +- 0.51 chips/hand, capped +0.61 (beats v1.1's 16-0-4, +1.02, capped +0.58).
+  * Friend held-out check (seeds 1-20, Stage 2): 19-0-1, +1.40 +- 0.33 chips/hand, capped +0.88 (beats v1.1's 18-0-2, +1.20, capped +0.82).
+  * Full zoo Stage 1 (seeds 1-10): 156-0-4 (97.5% win rate), 0 problems.
+  * Full zoo Stage 2 (seeds 1-10): 159-0-1 (99.4% win rate), 0 problems.
+  * Massive gains vs v1.1: rof_small (+2.01 chips/hand, capped jumps from +0.79 to +1.00), random_bot (+6.83), liar (+1.58), ai_typical (+3.02), ai_typical_v2 (+2.39), rof_big (+1.25), gto_like (+0.55).
+  * Timing: incremental history processing keeps engine time to ~30s per 500-hand leg (bank is 75s), 0 notices, 0 forfeits.
 
 ## 2. Next step
-Upload dist\bot.py (v1.1) to Unstop.
+Upload dist\bot.py (v2) to Unstop. Proceed to Phase 3 policy training.
 
 ## 2b. Change log
+- 2026-11-11 v2 (Bayesian Opponent Ranges - Phase 2 Step 2):
+  * Bayesian ranges: implemented `src/ranges.py` with `Range3` (22,100 combinations) and `Range2` (up to 990 combinations).
+  * Preflop: `Range3` updates prior distribution based on learned button raise frequency `pfr_btn` from Fix C and action likelihoods.
+  * Discard rule posterior: observes showdown discard choices, updates Dirichlet posterior over [LOWEST, CHEAP, RANDOM] discard policies, and weights `Range2` upon opponent discard reveal.
+  * Postflop likelihoods: updates `Range2` on opponent turn/river actions using Fix A learned bet size meaning $s_k$ smoothed over $\pm 5$ percentile points with weight floor at 0.08, avoiding double-counting with `read_history` ($x = 1.0$ when Bayesian range is active).
+  * Exact equity weighting: exact vectorized weights passed into `turn_equity` and `river_equity`, seamlessly integrated into `top_share_equity`.
+  * Incremental history processing: history events processed incrementally per action to eliminate redundant batch evaluations and keep match execution fast.
+  * Step 1b decision: bet-size grid kept for feature inputs in Phase 3 policy (`USE_SIZE_GRID = False`), avoiding greedy single-street trap.
 - 2026-11-11 v1.1 (fix-v1-1):
   * Stand-in opponent: implemented opponents\raise_or_fold.py plus 4 variants (rof_tight, rof_loose, rof_big, rof_small) and mirrored opponent liar.py.
   * Fix A (Adaptive size reading): at showdowns, calculates card strength percentile p using eval_batch; learns s_k per bet size bucket (small, med, large, over) smoothed with prior weight 6 and clamped to +-0.22 of prior until 30 showdowns.
@@ -65,8 +74,13 @@ Upload dist\bot.py (v1.1) to Unstop.
     - Objective per match: score = 0.6 * tanh(n / 0.25) + 0.4 * clip(n, -1, 1), F = weighted mean. Notice/forfeit/traceback: F = -10.
     - Train on Stage 1 length (200 hands/leg) >= 50% of the time.
     - Replacement gate: on held-out seeds, no winning W-D-L becomes losing, capped chips improve on average, friend S1 & S2 no worse within CI.
+- 2026-11-11 (user): Step 1b decision: do not ship it.
+  * Add USE_SIZE_GRID to config.py and set False: decisions use v1.1 sizing and response buckets exactly.
+  * Keep grid code and per-size counts as inputs to trained policy in Phase 3 (policy chooses among grid sizes with learned weights; exploration happens in training, not in matches).
+  * Proceed to Step 2 (Bayesian range with no-double-counting rule and USE_BAYES ablation), gated against snapshots\v1_1_bot.py. Do not snapshot v1_2.
 
 ## 4. Facts and lessons
+- Step 1b evaluation: greedy single-street EV over a size grid gets stuck (never tries the size the opponent calls) and loses multi-street value; capped chips fell 0.1-0.24 vs gto_like, rof variants, liar and friend. Fix belongs in the trained policy (multi-street value term e.g. learned weight x pot growth on flop/turn + softmax with learned temperature during training).
 - Diagnosis of 50 Stage-2 matches (50,000 hands) of v1 vs friend's bot:
   * v1 lost 31 of 50 matches, -11,871 chips (-0.24/hand); -0.83/hand as BB, +0.35 as button.
   * Friend's style: button opens top ~15% to 6, limps rest, folds worst 18%; BB 3-bets top ~5%, calls almost everything. Postflop bets ~1.0 pot are ahead 83-90% of the time, bets ~0.33 pot only 38-50%. Facing our 0.45-0.85 pot bets it almost never calls (0-6%): folds 56-79%, raises 15-43%.
