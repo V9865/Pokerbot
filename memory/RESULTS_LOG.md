@@ -192,8 +192,8 @@ Ran on final committed v1.1 `dist/bot.py` across identical seed lists:
 
 
 ## 2026-11-11 Phase 2 Step 2: Bayesian Opponent Ranges (v2 Bot)
-- **v2 Bot**: `dist/bot.py` = `snapshots/v2_bot.py` (`USE_BAYES = True`, `USE_SIZE_GRID = False`)
-- **Baseline**: `snapshots/v1_1_bot.py` (commit `b277b76`)
+- **v2 Bot**: `dist/bot.py` = `snapshots/v2_bot.py` (Git commit: `98fd49b`, `USE_BAYES = True`, `USE_SIZE_GRID = False`)
+- **Baseline**: `snapshots/v1_1_bot.py` (Git commit: `b277b76`)
 - Runs: `runs/v2_zoo_s1` (v2 Stage 1), `runs/v2_zoo_s2` (v2 Stage 2), `runs/h2h_bayes_vs_v11` (Head-to-head 40 seeds), `runs/v2_friend_s1_20` (Friend S1), `runs/v2_friend_s2_20` (Friend S2).
 
 ### Head-to-Head Regression Gate vs v1_1 (seeds 1-40, Stage 2)
