@@ -632,6 +632,8 @@ def main():
     p.add_argument("--no-time-limits", action="store_true",
                    help="disable the time bank, 5 s limit and wall-clock kill (debugging only)")
     args = p.parse_args()
+    if args.seed is not None:
+        os.environ["MATCH_SEED"] = str(args.seed)
     for path in (args.bot_a, args.bot_b):
         if not os.path.isfile(path):
             sys.exit(f"bot not found: {path}")

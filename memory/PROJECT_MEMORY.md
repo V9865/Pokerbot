@@ -78,6 +78,15 @@ Upload dist\bot.py (v2) to Unstop. Proceed to Phase 3 policy training.
   * Add USE_SIZE_GRID to config.py and set False: decisions use v1.1 sizing and response buckets exactly.
   * Keep grid code and per-size counts as inputs to trained policy in Phase 3 (policy chooses among grid sizes with learned weights; exploration happens in training, not in matches).
   * Proceed to Step 2 (Bayesian range with no-double-counting rule and USE_BAYES ablation), gated against snapshots\v1_1_bot.py. Do not snapshot v1_2.
+- 2026-11-11 (Phase 3 decisions approved by user):
+  * Baseline from now on is snapshots\v1_1_bot.py (commit b277b76).
+  * Wider opponent pool: opponents\persona.py with ~10 style knobs sampled deterministically by MATCH_SEED. Sanity: beats random_bot (5-0-0, +11.08 chips/hand), loses to v1_1 (0-0-5, +3.11 chips/hand for v1_1).
+  * Training pool: includes personas (seeds < 5000) at weight 4 (13.8% of pool <= 15% cap limit).
+  * Held-out pool (seeds >= 5000): 30 fixed personas (seeds 5000-5029), friend, friend2 (when added), liar, ai_typical, exploiter2. Never report training F on these.
+  * Policy architecture: RANGE_BLEND in [0, 1] between Bayesian range and v1.1 shrink range (starts at 0.0). Softmax sizing (learned TAU_BET) over 7-point grid {0.25, 0.33, 0.45, 0.60, 0.75, 1.00, 1.40} pot with multi-street future value term (BETA_MULTI * delta_pot).
+  * Stage A parameter scope: trains at most ~15 parameters (RANGE_BLEND, BETA_MULTI, TAU_BET, TAU_ACT, and ~10 key v1.1 thresholds). Residual weights fixed at 0 overnight.
+  * Warm start pass condition: head-to-head vs v1_1 over 40 seeds Stage 2 with wins between 16 and 24 and mean within its 95% CI of zero.
+  * Acceptance rule: average capped chips across ALL held-out opponents improves, win share does not fall, no win becomes a clear loss, and head-to-head vs live is not worse. No single opponent (friend included) decides acceptance alone.
 
 ## 4. Facts and lessons
 - Step 1b evaluation: greedy single-street EV over a size grid gets stuck (never tries the size the opponent calls) and loses multi-street value; capped chips fell 0.1-0.24 vs gto_like, rof variants, liar and friend. Fix belongs in the trained policy (multi-street value term e.g. learned weight x pot growth on flop/turn + softmax with learned temperature during training).

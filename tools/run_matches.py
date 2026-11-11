@@ -12,7 +12,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ZOO = [
     "station", "random_bot", "shover", "maniac", "nit", "minraiser",
     "ai_typical", "ai_typical_v2", "gto_like", "raise_or_fold",
-    "rof_tight", "rof_loose", "rof_big", "rof_small", "liar", "friend"
+    "rof_tight", "rof_loose", "rof_big", "rof_small", "liar", "friend",
+    "persona", "exploiter", "exploiter2"
 ]
 
 
@@ -40,7 +41,9 @@ def play(job):
            "--seed", str(seed), "--stage", str(args.stage), "--log-dir", logdir]
     if args.hands:
         cmd += ["--hands", str(args.hands)]
-    out = subprocess.run(cmd, capture_output=True, text=True).stdout
+    env = os.environ.copy()
+    env["MATCH_SEED"] = str(seed)
+    out = subprocess.run(cmd, env=env, capture_output=True, text=True).stdout
     r = {"opp": os.path.splitext(os.path.basename(opp))[0], "seed": seed, "net": None, "hands": None,
          "time_a": 0.0, "notices_a": 0, "notices_b": 0, "forfeit": "", "traceback": 0, "cap": None}
     m = re.search(r"\|\s*(\d+) of (\d+) hands played", out)

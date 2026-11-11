@@ -10,7 +10,7 @@ Never upload a variant; change src\config.py and rebuild dist\bot.py instead.
 """
 import ast, os, re, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ORDER = ["config", "cards", "evaluator", "preflop_table", "safety", "equity", "ranges", "features", "strategy", "main"]
+ORDER = ["config", "cards", "evaluator", "preflop_table", "safety", "equity", "ranges", "features", "opponent", "policy_params", "policy", "strategy", "main"]
 # add new modules to ORDER after everything they import (e.g. "ranges", "opponent" before "strategy")
 FORBIDDEN = ["socket", "subprocess", "threading", "multiprocessing", "os.system", "urllib", "requests", "open("]
 
@@ -18,13 +18,18 @@ FORBIDDEN = ["socket", "subprocess", "threading", "multiprocessing", "os.system"
 def main():
     argv = sys.argv[1:]
     sets = []
+    params_file = None
+    while "--params" in argv:
+        i = argv.index("--params")
+        params_file = argv[i + 1]
+        del argv[i:i + 2]
     while "--set" in argv:
         i = argv.index("--set")
         sets.append(argv[i + 1])
         del argv[i:i + 2]
     out = argv[0] if argv else os.path.join(ROOT, "dist", "bot.py")
-    if sets and os.path.abspath(out) == os.path.join(ROOT, "dist", "bot.py"):
-        sys.exit("--set builds test variants only; give an output path under runs\\variants")
+    if (sets or params_file) and os.path.abspath(out) == os.path.join(ROOT, "dist", "bot.py"):
+        sys.exit("--set / --params builds test variants only; give an output path under runs\\variants")
     src = os.path.join(ROOT, "src")
     extra = [f[:-3] for f in os.listdir(src) if f.endswith(".py") and f[:-3] not in ORDER]
     if extra:
@@ -52,6 +57,10 @@ def main():
             for kv in sets:
                 k, v = kv.split("=", 1)
                 parts.append("assert %r in CFG, 'unknown config name %s'\nCFG[%r] = %s\n" % (k, k, k, v))
+        elif name == "policy_params" and params_file:
+            import json
+            ov = json.load(open(params_file))
+            parts.append("\n# Overridden params from %s\nPARAMS.update(%r)\n" % (params_file, ov))
     parts.append('\n\nif __name__ == "__main__":\n    main()\n')
     code = "".join(parts)
     ast.parse(code)

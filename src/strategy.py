@@ -13,360 +13,11 @@ if HAVE_NP:
     from evaluator import eval_batch
     from equity import flop_equity, turn_equity, river_equity, top_share_equity
     from ranges import BayesRange
+from opponent import clamp, bet_bucket, nearest_grid_idx, OppModel
+from policy_params import PARAMS
+from policy import decide_policy
 
 KEEPS = ((0, 1, 2), (0, 2, 1), (1, 2, 0))      # (keep, keep, discard) indices
-
-
-def clamp(x, lo, hi):
-    return lo if x < lo else hi if x > hi else x
-
-
-def bet_bucket(frac):
-    """Bucket index for bet size relative to pot:
-    0: small (<0.4), 1: medium (0.4-0.8), 2: large (0.8-1.3), 3: over (>=1.3)"""
-    if frac < 0.4:
-        return 0
-    if frac < 0.8:
-        return 1
-    if frac < 1.3:
-        return 2
-    return 3
-
-
-def nearest_grid_idx(frac):
-    """Index of the nearest bet-size grid point in CFG['BET_GRID']."""
-    grid = CFG["BET_GRID"]
-    best_i = 0
-    best_d = abs(frac - grid[0])
-    for i in range(1, len(grid)):
-        d = abs(frac - grid[i])
-        if d < best_d:
-            best_d = d
-            best_i = i
-    return best_i
-
-
-class OppModel:
-    """Per-leg statistics about the opponent (resets with the process)."""
-
-    def __init__(self):
-        self.hands = 0
-        self.bets_faced = 0
-        self.folds_to_bet = 0
-        self.post_actions = 0
-        self.post_aggr = 0
-        self.big_pf = 0
-        self.pf_raises_faced = 0
-        self.pf_folds = 0
-        # Fix A: learned opponent bet size meaning
-        self.opp_bet_sum_p = [0.0, 0.0, 0.0, 0.0]
-        self.opp_bet_count = [0, 0, 0, 0]
-        # Fix B: response rates to our bets [fold, call, raise] per bucket
-        self.our_bet_counts = [[0, 0, 0] for _ in range(4)]
-        # Bet-size grid counts (kept for features / Phase 3)
-        self.grid_counts = [[0, 0, 0] for _ in range(len(CFG.get("BET_GRID", (0.25, 0.33, 0.45, 0.60, 0.75, 1.00, 1.40))))]
-        # Fix C: opponent button first-in raise tracking
-        self.btn_opps = 0
-        self.btn_raises = 0
-        # Discard rule posterior: [P(LOWEST), P(CHEAP), P(RANDOM)]
-        self.discard_rule_probs = [0.40, 0.40, 0.20]
-
-    def p_lowest(self):
-        return self.discard_rule_probs[0]
-
-    @staticmethod
-    def _freq(k, n, prior):
-        n0 = CFG["STAT_N0"]
-        return (k + n0 * prior) / (n + n0)
-
-    def fold_to_bet(self):
-        return self._freq(self.folds_to_bet, self.bets_faced, 0.40)
-
-    def aggression(self):
-        return self._freq(self.post_aggr, self.post_actions, 0.30)
-
-    def big_pf_freq(self):
-        return self._freq(self.big_pf, self.hands, 0.02)
-
-    def fold_to_pf_raise(self):
-        return self._freq(self.pf_folds, self.pf_raises_faced, 0.25)
-
-    def pfr_btn(self):
-        return (self.btn_raises + 10.0 * 0.45) / (self.btn_opps + 10.0)
-
-    def shrink(self, frac):
-        k = bet_bucket(frac)
-        priors = (CFG["SHRINK_BET_SMALL"], CFG["SHRINK_BET_MED"], CFG["SHRINK_BET_LARGE"], CFG["SHRINK_BET_OVER"])
-        prior = priors[k]
-        cnt = self.opp_bet_count[k]
-        if cnt == 0:
-            return prior
-        mean_p = self.opp_bet_sum_p[k] / cnt
-        s_raw = clamp(2.0 * mean_p, 0.08, 1.0)
-        w = float(CFG["SHRINK_PRIOR_WEIGHT"])
-        s = clamp((cnt * s_raw + w * prior) / (cnt + w), 0.08, 1.0)
-        if cnt < 30:
-            s = clamp(s, prior - 0.22, prior + 0.22)
-        return s
-
-    def response_rates(self, bucket):
-        k = clamp(bucket, 0, 3)
-        priors = ((0.30, 0.60, 0.10), (0.40, 0.50, 0.10), (0.50, 0.42, 0.08), (0.60, 0.38, 0.02))[k]
-        counts = self.our_bet_counts[k]
-        w = float(CFG["EV_PRIOR_WEIGHT"])
-        denom = sum(counts) + w
-        f = (counts[0] + w * priors[0]) / denom
-        c = (counts[1] + w * priors[1]) / denom
-        r = (counts[2] + w * priors[2]) / denom
-        if sum(counts) < 40:
-            f_clamped = clamp(f, priors[0] - 0.30, priors[0] + 0.30)
-            if f != f_clamped:
-                diff = f_clamped - f
-                f = f_clamped
-                c_r = c + r
-                if c_r > 0:
-                    c -= diff * (c / c_r)
-                    r -= diff * (r / c_r)
-        return f, c, r
-
-    def grid_response_rates(self, idx):
-        grid = CFG["BET_GRID"]
-        priors_list = CFG["BET_GRID_PRIORS"]
-        k = clamp(idx, 0, len(grid) - 1)
-        prior = priors_list[k]
-
-        nbrs = []
-        if k > 0:
-            nbrs.append(k - 1)
-        if k < len(grid) - 1:
-            nbrs.append(k + 1)
-
-        counts_k = self.grid_counts[k]
-        eff_f = counts_k[0] + 0.5 * sum(self.grid_counts[n][0] for n in nbrs)
-        eff_c = counts_k[1] + 0.5 * sum(self.grid_counts[n][1] for n in nbrs)
-        eff_r = counts_k[2] + 0.5 * sum(self.grid_counts[n][2] for n in nbrs)
-
-        w = float(CFG["EV_PRIOR_WEIGHT"])
-        denom = eff_f + eff_c + eff_r + w
-        f = (eff_f + w * prior[0]) / denom
-        c = (eff_c + w * prior[1]) / denom
-        r = (eff_r + w * prior[2]) / denom
-
-        total_obs = sum(counts_k) + sum(sum(self.grid_counts[n]) for n in nbrs)
-        if total_obs < 40:
-            f_clamped = clamp(f, prior[0] - 0.30, prior[0] + 0.30)
-            if f != f_clamped:
-                diff = f_clamped - f
-                f = f_clamped
-                c_r = c + r
-                if c_r > 0:
-                    c -= diff * (c / c_r)
-                    r -= diff * (r / c_r)
-        return f, c, r
-
-    def folds_enough(self, size):
-        """True when a bluff of `size` (pot fraction) is profitable on fold rate alone."""
-        return (self.bets_faced >= CFG["EXPLOIT_MIN_BETS"] and
-                self.fold_to_bet() >= size / (1.0 + size) + CFG["EXPLOIT_MARGIN"])
-
-    def is_station(self):
-        return self.bets_faced >= CFG["STATION_MIN"] and self.fold_to_bet() < CFG["STATION_FOLD"]
-
-    def observe_hand(self, history, my_seat="button"):
-        self.hands += 1
-        if my_seat == "big_blind":
-            self.btn_opps += 1
-            first_pf = None
-            for e in history or []:
-                if e.get("street") == "preflop":
-                    first_pf = e
-                    break
-            if first_pf and first_pf.get("actor") == "opp" and first_pf.get("action") == "raise":
-                self.btn_raises += 1
-
-        street = None
-        facing = False          # opponent is facing our postflop bet or raise
-        big = False
-        my_bet, opp_bet = 0, 0
-        pot = 3
-        last_our_bucket = None
-        last_our_grid_idx = None
-
-        for e in history or []:
-            st, who, act = e.get("street"), e.get("actor"), e.get("action")
-            if st != street:
-                street, facing = st, False
-                my_bet, opp_bet = (1, 2) if my_seat == "button" else (2, 1) if st == "preflop" else (0, 0)
-                last_our_bucket = None
-                last_our_grid_idx = None
-
-            amt = e.get("amount")
-            if who == "me":
-                if act == "raise" and amt is not None:
-                    if st != "preflop":
-                        pot_facing = max(1.0, pot - (amt - my_bet))
-                        frac = (amt - opp_bet) / pot_facing
-                        last_our_bucket = bet_bucket(frac)
-                        last_our_grid_idx = nearest_grid_idx(frac)
-                    pot += amt - my_bet
-                    my_bet = amt
-                    facing = True
-                elif act == "call":
-                    amt = opp_bet if amt is None else amt
-                    pot += amt - my_bet
-                    my_bet = amt
-                    facing = False
-                    last_our_bucket = None
-                    last_our_grid_idx = None
-                else:
-                    facing = False
-                    last_our_bucket = None
-                    last_our_grid_idx = None
-                continue
-
-            # who == "opp"
-            if st == "preflop":
-                if act == "raise" and (amt or 0) >= 40:
-                    big = True
-                if facing:
-                    self.pf_raises_faced += 1
-                    if act == "fold":
-                        self.pf_folds += 1
-                facing = False
-            else:
-                self.post_actions += 1
-                if act == "raise":
-                    self.post_aggr += 1
-                if facing:
-                    self.bets_faced += 1
-                    if act == "fold":
-                        self.folds_to_bet += 1
-                if last_our_bucket is not None:
-                    if act == "fold":
-                        self.our_bet_counts[last_our_bucket][0] += 1
-                        self.grid_counts[last_our_grid_idx][0] += 1
-                    elif act == "call":
-                        self.our_bet_counts[last_our_bucket][1] += 1
-                        self.grid_counts[last_our_grid_idx][1] += 1
-                    elif act == "raise":
-                        self.our_bet_counts[last_our_bucket][2] += 1
-                        self.grid_counts[last_our_grid_idx][2] += 1
-                    last_our_bucket = None
-                    last_our_grid_idx = None
-                facing = False
-
-            if act == "raise" and amt is not None:
-                pot += amt - opp_bet
-                opp_bet = amt
-            elif act == "call":
-                amt = my_bet if amt is None else amt
-                pot += amt - opp_bet
-                opp_bet = amt
-
-        if big:
-            self.big_pf += 1
-
-    def observe_showdown(self, opp_hole_cards, opp_discard, board, history, my_seat="button"):
-        if not HAVE_NP or not opp_hole_cards or not board:
-            return
-        opp_hole = [CARD_ID[c] for c in opp_hole_cards if c in CARD_ID]
-        if len(opp_hole) < 2:
-            return
-        opp_disc_id = CARD_ID.get(opp_discard)
-        opp3 = opp_hole + ([opp_disc_id] if opp_disc_id is not None else [])
-        board_ids = [CARD_ID[c] for c in board if c in CARD_ID]
-
-        # Learn discard rule
-        if opp_disc_id is not None and len(opp_hole) == 2 and len(board_ids) >= 3:
-            triplet = opp_hole + [opp_disc_id]
-            low_match = (min(triplet) == opp_disc_id)
-            _, _, cheap_d = cheap_keep(triplet, board_ids[:3])
-            ch_match = (cheap_d == opp_disc_id)
-
-            l_low = 0.90 if low_match else 0.05
-            l_ch = 0.90 if ch_match else 0.05
-            l_rnd = 1.0 / 3.0
-
-            probs = [
-                self.discard_rule_probs[0] * l_low,
-                self.discard_rule_probs[1] * l_ch,
-                self.discard_rule_probs[2] * l_rnd,
-            ]
-            s = sum(probs)
-            if s > 0:
-                probs = [p / s for p in probs]
-            probs = [max(0.02, p) for p in probs]
-            s2 = sum(probs)
-            self.discard_rule_probs = [p / s2 for p in probs]
-
-        my_bet, opp_bet = (1, 2) if my_seat == "button" else (2, 1)
-        pot = 3
-        street = "preflop"
-        opp_bets = []
-
-        for e in history or []:
-            st, who, act = e.get("street"), e.get("actor"), e.get("action")
-            if st != street:
-                street, my_bet, opp_bet = st, 0, 0
-            amt = e.get("amount")
-            if who == "me":
-                if act == "raise" and amt is not None:
-                    pot += amt - my_bet
-                    my_bet = amt
-                elif act == "call":
-                    amt = opp_bet if amt is None else amt
-                    pot += amt - my_bet
-                    my_bet = amt
-                continue
-            if act == "raise" and amt is not None:
-                if st != "preflop":
-                    frac = (amt - my_bet) / max(1.0, pot + (my_bet - opp_bet))
-                    opp_bets.append((st, bet_bucket(frac)))
-                pot += amt - opp_bet
-                opp_bet = amt
-            elif act == "call":
-                amt = my_bet if amt is None else amt
-                pot += amt - opp_bet
-                opp_bet = amt
-
-        if not opp_bets:
-            return
-
-        for st, bucket in opp_bets:
-            if st == "flop":
-                b = board_ids[:3]
-                if len(b) < 3:
-                    continue
-                if len(opp3) == 3:
-                    k0 = eval7([opp3[0], opp3[1]] + b)
-                    k1 = eval7([opp3[0], opp3[2]] + b)
-                    k2 = eval7([opp3[1], opp3[2]] + b)
-                    opp_sc = max(k0, k1, k2)
-                else:
-                    opp_sc = eval7(opp_hole + b)
-            elif st == "turn":
-                b = board_ids[:4]
-                if len(b) < 4:
-                    continue
-                opp_sc = eval7(opp_hole + b)
-            elif st == "river":
-                b = board_ids[:5]
-                if len(b) < 5:
-                    continue
-                opp_sc = eval7(opp_hole + b)
-            else:
-                continue
-
-            seen = set(opp3) | set(b)
-            unseen = np.array([c for c in range(52) if c not in seen], dtype=np.int64)
-            ui, uj = np.triu_indices(unseen.size, 1)
-            pairs = np.stack([unseen[ui], unseen[uj]], axis=1)
-            b_tile = np.tile(np.array(b, dtype=np.int64), (pairs.shape[0], 1))
-            cand_sc = eval_batch(np.concatenate([pairs, b_tile], axis=1))
-            p = float((cand_sc > opp_sc).sum()) / pairs.shape[0]
-
-            self.opp_bet_sum_p[bucket] += p
-            self.opp_bet_count[bucket] += 1
 
 
 def read_history(history, seat, opp):
@@ -585,15 +236,14 @@ class Brain:
         self.bayes_history_idx = len(hist)
 
     # ---------------------------------------------------------------- equity
-    def _equity(self, req, mode, x):
-        """Returns (e_all, top): top(share) = equity against the strongest
-        `share` of the opponent's range. Also caches the flop keep choice."""
+    def get_blended_equity(self, req, mode, x, blend=0.0):
+        """Returns (e_all, top) with range blending between Bayesian and v1.1."""
         board = [CARD_ID[c] for c in req.get("board") or []]
         street = len(board)
         if not HAVE_NP or mode == Governor.PANIC:
             e = scalar_equity(self.hole, board, self.dead, 40)
             return e, (lambda share: max(0.0, e - (1.0 - share) * 0.30))
-        use_bayes = CFG.get("USE_BAYES", False) and self.bayes_range is not None
+        use_bayes = CFG.get("USE_BAYES", False) and self.bayes_range is not None and blend > 0.0
         if street == 3 and len(self.hole) == 3:
             sim = self.cache.get("flop")
             if sim is None:
@@ -607,10 +257,20 @@ class Brain:
             best = int(np.argmax(by_keep))
             self.cache["keep"] = best
             return float(eq[best]), (lambda share: top_share_equity(win[best], key, w, share))
-        ck = "s%d" % street
+
+        b_key = int(round(blend * 100))
+        ck = "s%d_b%d" % (street, b_key)
         got = self.cache.get(ck)
         if got is None:
-            weights = self.bayes_range.get_weights2(board) if (use_bayes and self.bayes_range.w2 is not None) else None
+            weights = None
+            if use_bayes and self.bayes_range.w2 is not None:
+                w2 = self.bayes_range.get_weights2(board)
+                if w2 is not None and blend > 0.0:
+                    w_v1 = np.ones(len(w2)) / float(len(w2))
+                    weights = blend * w2 + (1.0 - blend) * w_v1
+                    s = weights.sum()
+                    if s > 0:
+                        weights /= s
             if street == 4:
                 step = (1, 2, 4)[mode]
                 e, hands, strength, res = turn_equity(self.hole, board, self.dead, weights, step)
@@ -620,6 +280,12 @@ class Brain:
             self.cache[ck] = got
         e, strength, res, w = got
         return e, (lambda share: top_share_equity(res, strength, w, share))
+
+    def _equity(self, req, mode, x):
+        """Returns (e_all, top): top(share) = equity against the strongest
+        `share` of the opponent's range. Also caches the flop keep choice."""
+        blend = float(PARAMS.get("RANGE_BLEND", 0.0)) if CFG.get("POLICY", "learned") == "learned" else (1.0 if CFG.get("USE_BAYES", False) else 0.0)
+        return self.get_blended_equity(req, mode, x, blend)
 
     # --------------------------------------------------------------- preflop
     def _preflop(self, req, pf_raises):
@@ -752,11 +418,14 @@ class Brain:
         x, pf_raises = read_history(req.get("history"), self.seat, self.opp)
         if use_bayes:
             self._update_bayes_from_history(req.get("history"), req.get("board") or [])
-            if self.bayes_range.w2 is not None:
-                x = 1.0  # NO DOUBLE COUNTING: opponent bets already narrowed the Bayesian range
-        if req.get("street") == "preflop":
+        policy_mode = CFG.get("POLICY", "learned")
+        if policy_mode == "learned" and mode != Governor.PANIC and HAVE_NP:
+            r = decide_policy(req, self, mode, x, pf_raises, PARAMS, self.rng)
+        elif req.get("street") == "preflop":
             r = self._preflop(req, pf_raises)
         else:
+            if use_bayes and self.bayes_range.w2 is not None:
+                x = 1.0  # NO DOUBLE COUNTING: opponent bets already narrowed the Bayesian range
             r = self._postflop(req, mode, x)
         r["type"] = "action"
         return r

@@ -123,23 +123,22 @@ Stage 1 is where v1.1 is weakest because its learning has fewer hands to observe
 ## 7. Stages
 | Stage | Trains | Dimensions | Generations | Typical time on 8 cores |
 | --- | --- | --- | --- | --- |
-| A | preflop parameters | ~15 | 15 | 1-2 h |
-| B | postflop structural parameters | ~30 | 25 | 3-5 h (overnight) |
-| C | residual weights r (L2 penalty 0.02 * sum r^2 subtracted from F) | 60 | 25 | 4-6 h (overnight) |
-| D | opponent-response parameters (a0, a1, preflop c terms) with the exploiter weight raised to 4 | ~10 | 15 | 1-2 h |
+| A | Core policy & key thresholds (~14 params: RANGE_BLEND, BETA_MULTI, TAU_BET, TAU_ACT, VALUE_MIN, CALL_MARGIN, BIG_CALL_MARGIN, BLUFF_SCALE, STACK_OFF_EQ, PF_OPEN_Q, PF_CALL_Q_MED, PF_3BET_Q, PF_CALL_PFR_MULT, RAISE_VALUE) | 14 | 15-25 | Measured & scaled to budget |
+| B | Postflop structural parameters | ~15 | 20 | Overnight |
+| C | Residual weights r (fixed at 0 in Stage A; trained only if time remains) | 60 | 25 | Optional |
+| D | Opponent-response parameters | ~10 | 15 | Optional |
 Measure the first generation's time and scale generations to fit the night.
-Stages C and D are optional if time runs out.
 
 ## 8. Accepting a stage
 After each stage, validate the stage's best params (built with --params):
-- held-out seeds 5000-5039 against: the previous snapshot, snapshots\v1_1_bot.py, friend,
-  gto_like, ai_typical_v2, the held-out ai_typical, liar, and the second exploiter.
-- A trained policy replaces v1.1 only if, on held-out seeds:
-  1. No matchup goes from a winning W-D-L to a losing one.
-  2. Capped chips (+-1.00/hand) improve on average across opponents.
-  3. friend Stage 1 AND Stage 2 are no worse than v1.1 within CI.
-  4. Head-to-head vs the previous snapshot is positive beyond its CI or at least not worse.
+- Held-out set (seeds >= 5000): 30 fixed personas (seeds 5000-5029), friend, liar, ai_typical, exploiter2.
+- A trained policy replaces the live version (snapshots\v1_1_bot.py) only if, on held-out seeds:
+  1. Average capped chips (+-1.00/hand) across ALL held-out opponents improves.
+  2. The share of held-out matchups won does not fall.
+  3. No held-out matchup goes from a win to a clear loss.
+  4. Head-to-head vs the live version is not worse.
   5. Safety and timing gates pass (reply < 250 ms, think time < 20% of bank, 0 errors/notices).
+  *Rule*: No single opponent (friend included) can decide acceptance on its own.
 - accepted -> write the params into src\policy_params.py, rebuild, snapshot
   vN, commit. Rejected -> keep the previous params; record why in memory.
 

@@ -265,4 +265,41 @@ Notable highlights:
 - `rof_big`: +4.77 chips/hand (+1.25 gain vs v1.1).
 - `gto_like`: +2.48 chips/hand (capped +1.00 vs +0.92).
 
+## 2026-11-11 Phase 3: Parametric Policy & Wider Opponent Pool Warm Start
+Bot: dist\bot.py / snapshots\v3_bot.py (commit hash: pending)
+Baseline: snapshots\v1_1_bot.py (commit b277b76)
+
+### 1. Head-to-Head Warm Start vs snapshots\v1_1_bot.py (Stage 2, 1,000 hands/match, seeds 1-40)
+Command: `py -3.11 tools\run_matches.py --bot dist\bot.py --opps snapshots\v1_1_bot.py --seeds 1-40 --stage 2 --jobs 8 --tag warm_start_h2h_exact`
+```
+opponent             n     W-D-L chips/hand   95% CI   capped  time s problems
+v1_1_bot            40   20-0-20      +0.05   +-0.14    +0.05    31.2        0
+```
+- Gate check: wins between 16 and 24 (PASSED: 20-0-20 = exactly 50%), mean within 95% CI of zero (PASSED: +0.05 +- 0.14 includes 0.0), 0 problems.
+
+### 2. Held-out 30 Fixed Personas (Stage 2, seeds 5000-5029)
+Command: `py -3.11 tools\run_matches.py --bot dist\bot.py --opps persona --seeds 5000-5029 --stage 2 --jobs 8 --tag warm_start_personas`
+```
+opponent             n     W-D-L chips/hand   95% CI   capped  time s problems
+persona             30    30-0-0      +3.70   +-0.48    +1.00    19.9        0
+```
+
+### 3. Held-out Opponents (Stage 2, seeds 5000-5019)
+Command: `py -3.11 tools\run_matches.py --bot dist\bot.py --opps friend,liar,ai_typical,exploiter2 --seeds 5000-5019 --stage 2 --jobs 8 --tag warm_start_held_out`
+```
+opponent             n     W-D-L chips/hand   95% CI   capped  time s problems
+friend              20    18-0-2      +1.18   +-0.37    +0.78    25.5        0
+liar                20    20-0-0      +4.50   +-0.55    +1.00    23.5        0
+ai_typical          20    20-0-0     +10.48   +-0.47    +1.00    30.2        0
+exploiter2          20    20-0-0      +9.28   +-0.73    +1.00    27.1        0
+```
+Overall: 108 wins, 2 losses in 110 matches (98.2% win rate) across all held-out opponents. 0 problems.
+
+### 4. Measured Generation Timing (1 real generation, pop 12, 16 opps, 4 matches/opp, Stage 1 length, --jobs 8)
+Command: `py -3.11 tools\train.py --stage A --gens 1 --pop 12 --matches-per-opp 4 --hands 400 --jobs 8`
+- Total matches: 12 candidates x 16 opponents x 4 matches = 768 matches.
+- Wall time: 3,297.4 s (54.96 minutes) across 8 cores.
+- Average throughput: 4.29 s / match across 8 cores (~0.54 match/sec).
+- Calibrated overnight training plan: fits in 8.5 hours using `--matches-per-opp 2` and 100-hand matches for the first third of generations.
+
 

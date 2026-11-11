@@ -2351,29 +2351,29 @@ def compute_features(hole, board, dead=None, opp_weights=None, opp_discard=None,
     }
 
 
-# ==================== strategy ====================
-"""Decision logic. Baseline v1: table preflop, range-narrowed equity postflop,
-value-heavy betting, simulated discard, minimal opponent statistics.
-Later phases replace the narrowing heuristic with the Bayesian range model."""
+# ==================== opponent ====================
+"""Opponent modeling and statistics tracking (per-leg)."""
+import math
 import random
-if HAVE_NP:
-    import numpy as np
 
-KEEPS = ((0, 1, 2), (0, 2, 1), (1, 2, 0))      # (keep, keep, discard) indices
+try:
+    import numpy as np
+    HAVE_NP = True
+except Exception:
+    HAVE_NP = False
 
 
 def clamp(x, lo, hi):
-    return lo if x < lo else hi if x > hi else x
+    return max(lo, min(hi, x))
 
 
 def bet_bucket(frac):
-    """Bucket index for bet size relative to pot:
-    0: small (<0.4), 1: medium (0.4-0.8), 2: large (0.8-1.3), 3: over (>=1.3)"""
-    if frac < 0.4:
+    """0 = small (< 0.40 pot), 1 = med (0.40 - 0.80), 2 = large (0.80 - 1.30), 3 = overbet (> 1.30)."""
+    if frac < 0.40:
         return 0
-    if frac < 0.8:
+    if frac < 0.80:
         return 1
-    if frac < 1.3:
+    if frac < 1.30:
         return 2
     return 3
 
@@ -2415,6 +2415,9 @@ class OppModel:
         self.btn_raises = 0
         # Discard rule posterior: [P(LOWEST), P(CHEAP), P(RANDOM)]
         self.discard_rule_probs = [0.40, 0.40, 0.20]
+        # Big bet honesty tracking: fraction of big bets (> 0.8 pot) showing top 30% strength
+        self.opp_big_bets_faced = 0
+        self.opp_big_bet_showdown_strong = 0
 
     def p_lowest(self):
         return self.discard_rule_probs[0]
@@ -2438,6 +2441,9 @@ class OppModel:
 
     def pfr_btn(self):
         return (self.btn_raises + 10.0 * 0.45) / (self.btn_opps + 10.0)
+
+    def big_bet_honesty(self):
+        return (self.opp_big_bet_showdown_strong + 2.0 * 0.50) / (self.opp_big_bets_faced + 2.0)
 
     def shrink(self, frac):
         k = bet_bucket(frac)
@@ -2510,7 +2516,6 @@ class OppModel:
         return f, c, r
 
     def folds_enough(self, size):
-        """True when a bluff of `size` (pot fraction) is profitable on fold rate alone."""
         return (self.bets_faced >= CFG["EXPLOIT_MIN_BETS"] and
                 self.fold_to_bet() >= size / (1.0 + size) + CFG["EXPLOIT_MARGIN"])
 
@@ -2530,7 +2535,7 @@ class OppModel:
                 self.btn_raises += 1
 
         street = None
-        facing = False          # opponent is facing our postflop bet or raise
+        facing = False
         big = False
         my_bet, opp_bet = 0, 0
         pot = 3
@@ -2666,7 +2671,7 @@ class OppModel:
             if act == "raise" and amt is not None:
                 if st != "preflop":
                     frac = (amt - my_bet) / max(1.0, pot + (my_bet - opp_bet))
-                    opp_bets.append((st, bet_bucket(frac)))
+                    opp_bets.append((st, bet_bucket(frac), frac))
                 pot += amt - opp_bet
                 opp_bet = amt
             elif act == "call":
@@ -2677,41 +2682,436 @@ class OppModel:
         if not opp_bets:
             return
 
-        for st, bucket in opp_bets:
+        for st, bucket, frac in opp_bets:
             if st == "flop":
                 b = board_ids[:3]
                 if len(b) < 3:
                     continue
                 if len(opp3) == 3:
-                    k0 = eval7([opp3[0], opp3[1]] + b)
-                    k1 = eval7([opp3[0], opp3[2]] + b)
-                    k2 = eval7([opp3[1], opp3[2]] + b)
-                    opp_sc = max(k0, k1, k2)
+                    a, b_k, _ = cheap_keep(opp3, b)
+                    cards2 = [a, b_k]
                 else:
-                    opp_sc = eval7(opp_hole + b)
+                    cards2 = opp_hole
+                b4_arr = np.array(b + [board_ids[3]] if len(board_ids) > 3 else b + [51], dtype=np.int64)
             elif st == "turn":
-                b = board_ids[:4]
-                if len(b) < 4:
+                if len(board_ids) < 4:
                     continue
-                opp_sc = eval7(opp_hole + b)
-            elif st == "river":
-                b = board_ids[:5]
-                if len(b) < 5:
-                    continue
-                opp_sc = eval7(opp_hole + b)
+                cards2 = opp_hole
+                b4_arr = np.array(board_ids[:4], dtype=np.int64)
             else:
+                if len(board_ids) < 5:
+                    continue
+                cards2 = opp_hole
+                eval_row = np.array([cards2 + board_ids[:5]], dtype=np.int64)
+                actual_score = eval_batch(eval_row)[0]
+                seen = set(cards2) | set(board_ids[:5])
+                unseen = [c for c in range(52) if c not in seen]
+                opp_rows = []
+                for i in range(len(unseen)):
+                    for j in range(i + 1, len(unseen)):
+                        opp_rows.append([unseen[i], unseen[j]] + board_ids[:5])
+                all_scores = eval_batch(np.array(opp_rows, dtype=np.int64))
+                p = float(np.mean(all_scores > actual_score) + 0.5 * np.mean(all_scores == actual_score))
+                self.opp_bet_sum_p[bucket] += p
+                self.opp_bet_count[bucket] += 1
+                if frac > 0.8:
+                    self.opp_big_bets_faced += 1
+                    if p <= 0.30:
+                        self.opp_big_bet_showdown_strong += 1
                 continue
 
-            seen = set(opp3) | set(b)
-            unseen = np.array([c for c in range(52) if c not in seen], dtype=np.int64)
-            ui, uj = np.triu_indices(unseen.size, 1)
-            pairs = np.stack([unseen[ui], unseen[uj]], axis=1)
-            b_tile = np.tile(np.array(b, dtype=np.int64), (pairs.shape[0], 1))
-            cand_sc = eval_batch(np.concatenate([pairs, b_tile], axis=1))
-            p = float((cand_sc > opp_sc).sum()) / pairs.shape[0]
-
+            seen = set(cards2) | set(board_ids[:len(b4_arr)])
+            unseen = [c for c in range(52) if c not in seen]
+            opp_rows = []
+            for i in range(len(unseen)):
+                for j in range(i + 1, len(unseen)):
+                    opp_rows.append([unseen[i], unseen[j]] + list(b4_arr[:4]))
+            all_scores = eval_batch(np.array(opp_rows, dtype=np.int64))
+            actual_score = eval_batch(np.array([cards2 + list(b4_arr[:4])], dtype=np.int64))[0]
+            p = float(np.mean(all_scores > actual_score) + 0.5 * np.mean(all_scores == actual_score))
             self.opp_bet_sum_p[bucket] += p
             self.opp_bet_count[bucket] += 1
+            if frac > 0.8:
+                self.opp_big_bets_faced += 1
+                if p <= 0.30:
+                    self.opp_big_bet_showdown_strong += 1
+
+# ==================== policy_params ====================
+"""Parameters and bounds for the trained policy.
+Stage A trains at most ~15 parameters. Residual weights stay fixed at 0.
+Initial values reproduce v1.1 behavior.
+"""
+try:
+    import numpy as np
+except Exception:
+    np = None
+
+STAGE_A_NAMES = [
+    "RANGE_BLEND",
+    "BETA_MULTI",
+    "TAU_BET",
+    "TAU_ACT",
+    "VALUE_MIN",
+    "CALL_MARGIN",
+    "BIG_CALL_MARGIN",
+    "BLUFF_SCALE",
+    "STACK_OFF_EQ",
+    "PF_OPEN_Q",
+    "PF_CALL_Q_MED",
+    "PF_3BET_Q",
+    "PF_CALL_PFR_MULT",
+    "RAISE_VALUE",
+]
+
+PARAMS = {
+    # Phase 3 trainable parameters
+    "RANGE_BLEND": 0.0,         # 0.0 = pure v1.1 range, 1.0 = pure Bayesian range
+    "BETA_MULTI": 0.0,          # learned weight on multi-street expected pot growth
+    "TAU_BET": 0.02,            # softmax temperature over bet sizes (0.02 = argmax v1.1)
+    "TAU_ACT": 0.02,            # softmax temperature over actions (0.02 = argmax v1.1)
+    "BLUFF_SCALE": 1.0,         # scale factor on bluff frequencies
+    # Key postflop thresholds
+    "VALUE_MIN": 0.53,
+    "VALUE_BIG": 0.66,
+    "CALL_MARGIN": 0.04,
+    "BIG_CALL_MARGIN": 0.07,
+    "RAISE_VALUE": 0.78,
+    "STACK_OFF_EQ": 0.62,
+    "OOP_PENALTY": 0.02,
+    "UNCERTAINTY": 0.25,
+    "EV_MIX_MARGIN": 0.03,
+    "BLUFF_FLOP": 0.12,
+    "BLUFF_TURN": 0.06,
+    "BLUFF_RIVER": 0.04,
+    "BLUFF_MAX_EQ": 0.40,
+    "BLUFF_SIZE": 0.60,
+    "ALLIN_IF_STACK_USE": 0.70,
+    # Key preflop thresholds
+    "PF_OPEN_Q": 0.75,
+    "PF_OPEN_SIZE": 5.0,
+    "PF_ISO_Q": 0.30,
+    "PF_ISO_SIZE": 6.0,
+    "PF_3BET_Q": 0.08,
+    "PF_4BET_Q": 0.03,
+    "PF_5BET_Q": 0.012,
+    "PF_CALL_Q_SMALL": 0.80,
+    "PF_CALL_Q_MED": 0.55,
+    "PF_CALL_Q_BIG": 0.30,
+    "PF_CALL_Q_HUGE": 0.14,
+    "PF_CALL_Q_ALLIN": 0.05,
+    "PF_SHOVE_ADAPT": 0.47,
+    "PF_CALL_PFR_MULT": 1.30,
+}
+
+BOUNDS = {
+    "RANGE_BLEND": (0.0, 1.0),
+    "BETA_MULTI": (0.0, 1.0),
+    "TAU_BET": (0.02, 0.40),
+    "TAU_ACT": (0.02, 0.40),
+    "BLUFF_SCALE": (0.0, 2.5),
+    "VALUE_MIN": (0.45, 0.65),
+    "VALUE_BIG": (0.55, 0.80),
+    "CALL_MARGIN": (0.00, 0.12),
+    "BIG_CALL_MARGIN": (0.02, 0.18),
+    "RAISE_VALUE": (0.68, 0.90),
+    "STACK_OFF_EQ": (0.50, 0.75),
+    "OOP_PENALTY": (0.0, 0.08),
+    "UNCERTAINTY": (0.05, 0.50),
+    "EV_MIX_MARGIN": (0.00, 0.10),
+    "BLUFF_FLOP": (0.0, 0.35),
+    "BLUFF_TURN": (0.0, 0.25),
+    "BLUFF_RIVER": (0.0, 0.20),
+    "BLUFF_MAX_EQ": (0.20, 0.50),
+    "BLUFF_SIZE": (0.33, 1.00),
+    "ALLIN_IF_STACK_USE": (0.50, 0.90),
+    "PF_OPEN_Q": (0.50, 0.95),
+    "PF_OPEN_SIZE": (4.0, 8.0),
+    "PF_ISO_Q": (0.15, 0.55),
+    "PF_ISO_SIZE": (4.0, 9.0),
+    "PF_3BET_Q": (0.03, 0.18),
+    "PF_4BET_Q": (0.01, 0.08),
+    "PF_5BET_Q": (0.005, 0.04),
+    "PF_CALL_Q_SMALL": (0.60, 0.95),
+    "PF_CALL_Q_MED": (0.35, 0.75),
+    "PF_CALL_Q_BIG": (0.15, 0.55),
+    "PF_CALL_Q_HUGE": (0.05, 0.35),
+    "PF_CALL_Q_ALLIN": (0.01, 0.15),
+    "PF_SHOVE_ADAPT": (0.20, 0.80),
+    "PF_CALL_PFR_MULT": (0.60, 2.20),
+}
+
+# 60 residual weights (5 action classes x 12 features)
+ACTION_CLASSES = ["passive", "small_bet", "big_bet", "allin", "fold"]
+FEATURE_COUNT = 12
+
+for act_name in ACTION_CLASSES:
+    for f_idx in range(FEATURE_COUNT):
+        p_name = f"r_{act_name}_{f_idx}"
+        PARAMS[p_name] = 0.0
+        BOUNDS[p_name] = (-0.50, 0.50)
+
+
+def pack_params(param_dict=None, names=None):
+    if param_dict is None:
+        param_dict = PARAMS
+    if names is None:
+        names = STAGE_A_NAMES
+    return [float(param_dict.get(k, PARAMS.get(k, 0.0))) for k in names]
+
+
+def unpack_params(values, names=None):
+    if names is None:
+        names = STAGE_A_NAMES
+    res = dict(PARAMS)
+    for k, v in zip(names, values):
+        lo, hi = BOUNDS[k]
+        res[k] = max(lo, min(hi, float(v)))
+    return res
+
+
+def to_unit_cube(values, names=None):
+    if names is None:
+        names = STAGE_A_NAMES
+    unit = []
+    for k, v in zip(names, values):
+        lo, hi = BOUNDS[k]
+        unit.append((v - lo) / (hi - lo) if hi > lo else 0.5)
+    return unit
+
+
+def from_unit_cube(unit_vec, names=None):
+    if names is None:
+        names = STAGE_A_NAMES
+    raw = []
+    for k, u in zip(names, unit_vec):
+        lo, hi = BOUNDS[k]
+        u_clamped = max(0.0, min(1.0, float(u)))
+        raw.append(lo + u_clamped * (hi - lo))
+    return raw
+
+
+def pack_stage_a(param_dict=None):
+    raw = pack_params(param_dict, STAGE_A_NAMES)
+    u = to_unit_cube(raw, STAGE_A_NAMES)
+    return np.array(u, dtype=np.float64) if np is not None else u
+
+
+def unpack_stage_a(unit_vec):
+    raw = from_unit_cube(unit_vec, STAGE_A_NAMES)
+    return unpack_params(raw, STAGE_A_NAMES)
+
+# ==================== policy ====================
+"""The trained decision policy: preflop, postflop EV betting, softmax sizing, and range blending."""
+import math
+import random
+
+try:
+    import numpy as np
+    HAVE_NP = True
+except Exception:
+    HAVE_NP = False
+
+
+def softmax(scores, tau=0.02):
+    """Numerically stable softmax."""
+    tau = max(0.01, float(tau))
+    s = np.array(scores, dtype=np.float64) / tau
+    s_max = np.max(s)
+    exp_s = np.exp(s - s_max)
+    total = np.sum(exp_s)
+    if total <= 0:
+        return np.ones(len(scores)) / len(scores)
+    return exp_s / total
+
+
+def decide_policy(req, brain, mode, x, pf_raises, params=None, rng=None):
+    """Entry point for policy decisions."""
+    if params is None:
+        params = PARAMS
+    if rng is None:
+        rng = brain.rng if brain.rng is not None else np.random.default_rng()
+
+    street_name = req.get("street")
+    if street_name == "preflop":
+        return decide_preflop(req, brain, pf_raises, params)
+    return decide_postflop(req, brain, mode, x, params, rng)
+
+
+def decide_preflop(req, brain, pf_raises, params):
+    legal = req["legal_actions"]
+    q = preflop_q(*brain.hole)
+    to_call = req.get("to_call", 0)
+    opp_bet = req.get("opp_bet", 0)
+    can_raise = "raise" in legal
+    hi = req.get("max_raise", 0)
+
+    steal = (brain.opp.pf_raises_faced >= CFG["EXPLOIT_MIN_BETS"] and
+             brain.opp.fold_to_pf_raise() >= CFG["PF_STEAL_FOLD"])
+
+    if to_call == 0:
+        if can_raise and q <= (CFG["PF_ISO_Q_STEAL"] if steal else params.get("PF_ISO_Q", 0.30)):
+            return {"action": "raise", "amount": int(round(params.get("PF_ISO_SIZE", 6.0)))}
+        return {"action": "check"}
+
+    if pf_raises == 0:
+        if can_raise and q <= (1.0 if steal else params.get("PF_OPEN_Q", 0.75)):
+            return {"action": "raise", "amount": int(round(params.get("PF_OPEN_SIZE", 5.0)))}
+        return {"action": "call"}
+
+    shove_q = clamp(params.get("PF_SHOVE_ADAPT", 0.47) * brain.opp.big_pf_freq(),
+                    params.get("PF_CALL_Q_ALLIN", 0.05), params.get("PF_SHOVE_ADAPT", 0.47))
+
+    if opp_bet <= 8:
+        call_q = params.get("PF_CALL_Q_SMALL", 0.80)
+    elif opp_bet <= 16:
+        call_q = params.get("PF_CALL_Q_MED", 0.55)
+    elif opp_bet <= 40:
+        call_q = max(params.get("PF_CALL_Q_BIG", 0.30), shove_q)
+    elif opp_bet <= 80:
+        call_q = max(params.get("PF_CALL_Q_HUGE", 0.14), shove_q)
+    else:
+        call_q = shove_q
+
+    if brain.seat == "big_blind" and pf_raises == 1:
+        nominal = params.get("PF_CALL_PFR_MULT", 1.30) * 0.45 + 0.05
+        adapted = clamp(params.get("PF_CALL_PFR_MULT", 1.30) * brain.opp.pfr_btn() + 0.05,
+                        nominal - 0.20, nominal + 0.20)
+        call_q = min(call_q, adapted)
+
+    if can_raise:
+        if pf_raises == 1:
+            t3 = params.get("PF_3BET_Q", 0.08)
+            if brain.seat == "big_blind":
+                t3 = min(t3, 0.30 * brain.opp.pfr_btn())
+            if q <= t3:
+                return {"action": "raise", "amount": min(hi, 3 * opp_bet)}
+        if pf_raises == 2 and q <= params.get("PF_4BET_Q", 0.03):
+            return {"action": "raise", "amount": min(hi, int(2.5 * opp_bet))}
+        if pf_raises >= 3 and q <= params.get("PF_5BET_Q", 0.012):
+            return {"action": "raise", "amount": hi}
+
+    if q <= call_q:
+        return {"action": "call"}
+    return {"action": "fold"}
+
+
+def decide_postflop(req, brain, mode, x, params, rng):
+    legal = req["legal_actions"]
+    board_cards = req.get("board") or []
+    street = len(board_cards)
+
+    # 1. Equity evaluation with RANGE_BLEND
+    blend = float(params.get("RANGE_BLEND", 0.0))
+    e_all, top = brain.get_blended_equity(req, mode, x, blend)
+
+    x_eff = (1.0 - blend) * x + blend * 1.0
+    u = params.get("UNCERTAINTY", 0.25)
+    e_r = (1.0 - u) * top(x_eff) + u * e_all
+    if brain.seat != "button":
+        e_r -= params.get("OOP_PENALTY", 0.02)
+
+    to_call = req.get("to_call", 0)
+    pot = req["pot"]
+    can_raise = "raise" in legal
+
+    # Facing check: evaluate bet sizing over grid
+    if to_call == 0:
+        if can_raise:
+            station = brain.opp.is_station()
+            R = 1.0 if brain.seat == "button" else 0.85
+            ev_check = R * e_r * pot
+
+            use_grid = CFG.get("USE_SIZE_GRID", False)
+            bet_sizes = CFG["BET_GRID"] if use_grid else CFG["EV_BET_SIZES"]
+            candidate_actions = []
+            ev_scores = []
+
+            for frac in bet_sizes:
+                if frac > 1.0:
+                    target_amt = req.get("opp_bet", 0) + frac * (pot + to_call)
+                    if target_amt > req["max_raise"]:
+                        continue
+                b_action = brain._bet(req, frac, e_r)
+                if b_action is None:
+                    continue
+                b = b_action["amount"]
+                if use_grid:
+                    grid_idx = nearest_grid_idx(b / max(1.0, pot))
+                    f_b, c_b, r_b = brain.opp.grid_response_rates(grid_idx)
+                else:
+                    bucket = bet_bucket(b / max(1.0, pot))
+                    f_b, c_b, r_b = brain.opp.response_rates(bucket)
+                x_call = (1.0 - blend) * max(CFG["SHRINK_FLOOR"], x * (1.0 - f_b)) + blend * max(CFG["SHRINK_FLOOR"], 1.0 - f_b)
+                e_call_b = top(x_call)
+                if station and e_call_b < 0.50:
+                    continue
+
+                # Multi-street value term: future pot growth when called
+                rem_streets = max(0, 5 - street)
+                delta_pot = (0.50 * (pot + 2.0 * b) if rem_streets == 2 else 0.25 * (pot + 2.0 * b) if rem_streets == 1 else 0.0)
+                beta_multi = float(params.get("BETA_MULTI", 0.0))
+                ev_future = c_b * beta_multi * delta_pot
+
+                ev_b = f_b * pot + c_b * (e_call_b * (pot + 2.0 * b) - b) + ev_future - r_b * b
+                candidate_actions.append(b_action)
+                ev_scores.append(ev_b)
+
+            if candidate_actions:
+                tau_bet = float(params.get("TAU_BET", 0.02))
+                if tau_bet <= 0.025 or len(candidate_actions) == 1:
+                    best_idx = int(np.argmax(ev_scores))
+                else:
+                    probs = softmax(ev_scores, tau_bet)
+                    best_idx = int(rng.choice(len(candidate_actions), p=probs))
+
+                best_bet = candidate_actions[best_idx]
+                best_ev = ev_scores[best_idx]
+
+                tau_act = float(params.get("TAU_ACT", 0.02))
+                should_bet = best_ev > ev_check
+                if tau_act > 0.025:
+                    diff = (best_ev - ev_check) / max(1.0, pot)
+                    p_bet = 1.0 / (1.0 + math.exp(-clamp(diff / tau_act, -20.0, 20.0)))
+                    should_bet = (rng.random() < p_bet)
+
+                if should_bet:
+                    if street == 5 and (best_ev - ev_check) < params.get("EV_MIX_MARGIN", 0.03) * pot:
+                        if random.random() < 0.50:
+                            return {"action": "check"}
+                    return best_bet
+        return {"action": "check"}
+
+    # Facing bet
+    need = to_call / float(pot + to_call)
+    big_call = to_call > 0.4 * max(1, req.get("my_stack", 200))
+    margin = params.get("BIG_CALL_MARGIN", 0.07) if big_call else params.get("CALL_MARGIN", 0.04)
+
+    if can_raise and e_r >= params.get("RAISE_VALUE", 0.78):
+        b = brain._bet(req, CFG["BET_BIG"], e_r)
+        if b:
+            return b
+
+    tau_act = float(params.get("TAU_ACT", 0.02))
+    diff = e_r - (need + margin)
+    if tau_act <= 0.025:
+        if diff >= 0:
+            return {"action": "call"}
+        return {"action": "fold"}
+    else:
+        p_call = 1.0 / (1.0 + math.exp(-clamp(diff / tau_act, -20.0, 20.0)))
+        if rng.random() < p_call:
+            return {"action": "call"}
+        return {"action": "fold"}
+
+# ==================== strategy ====================
+"""Decision logic. Baseline v1: table preflop, range-narrowed equity postflop,
+value-heavy betting, simulated discard, minimal opponent statistics.
+Later phases replace the narrowing heuristic with the Bayesian range model."""
+import random
+if HAVE_NP:
+    import numpy as np
+
+KEEPS = ((0, 1, 2), (0, 2, 1), (1, 2, 0))      # (keep, keep, discard) indices
 
 
 def read_history(history, seat, opp):
@@ -2930,15 +3330,14 @@ class Brain:
         self.bayes_history_idx = len(hist)
 
     # ---------------------------------------------------------------- equity
-    def _equity(self, req, mode, x):
-        """Returns (e_all, top): top(share) = equity against the strongest
-        `share` of the opponent's range. Also caches the flop keep choice."""
+    def get_blended_equity(self, req, mode, x, blend=0.0):
+        """Returns (e_all, top) with range blending between Bayesian and v1.1."""
         board = [CARD_ID[c] for c in req.get("board") or []]
         street = len(board)
         if not HAVE_NP or mode == Governor.PANIC:
             e = scalar_equity(self.hole, board, self.dead, 40)
             return e, (lambda share: max(0.0, e - (1.0 - share) * 0.30))
-        use_bayes = CFG.get("USE_BAYES", False) and self.bayes_range is not None
+        use_bayes = CFG.get("USE_BAYES", False) and self.bayes_range is not None and blend > 0.0
         if street == 3 and len(self.hole) == 3:
             sim = self.cache.get("flop")
             if sim is None:
@@ -2952,10 +3351,20 @@ class Brain:
             best = int(np.argmax(by_keep))
             self.cache["keep"] = best
             return float(eq[best]), (lambda share: top_share_equity(win[best], key, w, share))
-        ck = "s%d" % street
+
+        b_key = int(round(blend * 100))
+        ck = "s%d_b%d" % (street, b_key)
         got = self.cache.get(ck)
         if got is None:
-            weights = self.bayes_range.get_weights2(board) if (use_bayes and self.bayes_range.w2 is not None) else None
+            weights = None
+            if use_bayes and self.bayes_range.w2 is not None:
+                w2 = self.bayes_range.get_weights2(board)
+                if w2 is not None and blend > 0.0:
+                    w_v1 = np.ones(len(w2)) / float(len(w2))
+                    weights = blend * w2 + (1.0 - blend) * w_v1
+                    s = weights.sum()
+                    if s > 0:
+                        weights /= s
             if street == 4:
                 step = (1, 2, 4)[mode]
                 e, hands, strength, res = turn_equity(self.hole, board, self.dead, weights, step)
@@ -2965,6 +3374,12 @@ class Brain:
             self.cache[ck] = got
         e, strength, res, w = got
         return e, (lambda share: top_share_equity(res, strength, w, share))
+
+    def _equity(self, req, mode, x):
+        """Returns (e_all, top): top(share) = equity against the strongest
+        `share` of the opponent's range. Also caches the flop keep choice."""
+        blend = float(PARAMS.get("RANGE_BLEND", 0.0)) if CFG.get("POLICY", "learned") == "learned" else (1.0 if CFG.get("USE_BAYES", False) else 0.0)
+        return self.get_blended_equity(req, mode, x, blend)
 
     # --------------------------------------------------------------- preflop
     def _preflop(self, req, pf_raises):
@@ -3097,11 +3512,14 @@ class Brain:
         x, pf_raises = read_history(req.get("history"), self.seat, self.opp)
         if use_bayes:
             self._update_bayes_from_history(req.get("history"), req.get("board") or [])
-            if self.bayes_range.w2 is not None:
-                x = 1.0  # NO DOUBLE COUNTING: opponent bets already narrowed the Bayesian range
-        if req.get("street") == "preflop":
+        policy_mode = CFG.get("POLICY", "learned")
+        if policy_mode == "learned" and mode != Governor.PANIC and HAVE_NP:
+            r = decide_policy(req, self, mode, x, pf_raises, PARAMS, self.rng)
+        elif req.get("street") == "preflop":
             r = self._preflop(req, pf_raises)
         else:
+            if use_bayes and self.bayes_range.w2 is not None:
+                x = 1.0  # NO DOUBLE COUNTING: opponent bets already narrowed the Bayesian range
             r = self._postflop(req, mode, x)
         r["type"] = "action"
         return r
