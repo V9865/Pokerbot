@@ -266,7 +266,7 @@ Notable highlights:
 - `gto_like`: +2.48 chips/hand (capped +1.00 vs +0.92).
 
 ## 2026-11-11 Phase 3: Parametric Policy & Wider Opponent Pool Warm Start
-Bot: dist\bot.py / snapshots\v3_bot.py (commit hash: pending)
+Bot: dist\bot.py / snapshots\v3_bot.py (commit hash: bc2deed)
 Baseline: snapshots\v1_1_bot.py (commit b277b76)
 
 ### 1. Head-to-Head Warm Start vs snapshots\v1_1_bot.py (Stage 2, 1,000 hands/match, seeds 1-40)
