@@ -18,6 +18,7 @@ import glob
 import json
 import math
 import os
+import pickle
 import re
 import shutil
 import subprocess
@@ -164,12 +165,14 @@ def run_training():
         matches_per_opp = args.matches_per_opp if args.matches_per_opp is not None else 2
 
     stage_name = args.stage
-    out_dir = os.path.join(ROOT, "runs", "train", f"stage_{stage_name.lower()}")
+    default_runs = r"C:\pokerbot_runs" if os.name == "nt" else os.path.join(ROOT, "runs")
+    runs_dir = os.environ.get("POKERBOT_RUNS_DIR", default_runs)
+    out_dir = os.path.join(runs_dir, "train", f"stage_{stage_name.lower()}")
     os.makedirs(out_dir, exist_ok=True)
 
     print("=" * 60)
     print(f"CMA-ES Policy Training - Stage {stage_name}")
-    print(f"  Population: {args.pop}, Generations: {args.gens}, Jobs: {args.jobs}")
+    print(f"  Population: {args.pop}, Target Generations: {args.gens}, Jobs: {args.jobs}")
     print(f"  Opponents: {len(resolved_opps)} (Total weight: {tot_weight})")
     print(f"  Matches per opponent: {matches_per_opp}")
     print(f"  Output directory: {out_dir}")
@@ -186,20 +189,41 @@ def run_training():
 
     start_gen = 1
     if args.resume:
+        latest_pkl = os.path.join(out_dir, "cma_latest.pkl")
         checkpoints = sorted(glob.glob(os.path.join(out_dir, "gen_*.json")))
+        if os.path.isfile(latest_pkl):
+            try:
+                with open(latest_pkl, "rb") as pf:
+                    es = pickle.load(pf)
+                print(f"Loaded CMA-ES state from {latest_pkl} (sigma={es.sigma:.4f})")
+            except Exception as e:
+                print(f"Could not load {latest_pkl} ({e}), initializing fresh CMA with checkpoint mean")
         if checkpoints:
             latest_ck = checkpoints[-1]
             with open(latest_ck, "r", encoding="utf-8") as f:
                 ck_data = json.load(f)
             start_gen = ck_data["gen"] + 1
-            print(f"Resuming from checkpoint {latest_ck} (starting gen {start_gen})")
+            print(f"Resuming from generation {start_gen} (latest checkpoint {latest_ck})")
+            if not os.path.isfile(latest_pkl) and "best_params" in ck_data:
+                x_resume = pack_stage_a(ck_data["best_params"])
+                sigma_resume = ck_data.get("sigma", 0.15)
+                es = cma.CMAEvolutionStrategy(x_resume, sigma_resume, {
+                    "bounds": [0.0, 1.0],
+                    "popsize": args.pop,
+                    "seed": 42 + start_gen
+                })
 
     log_file = os.path.join(ROOT, "memory", "TRAINING_LOG.md")
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
     total_matches_run = 0
 
-    for gen in range(start_gen, start_gen + args.gens):
+    target_gens = args.gens if not args.resume else max(args.gens, start_gen + args.gens - 1)
+    if start_gen > target_gens:
+        print(f"Target generations ({target_gens}) already reached (start_gen={start_gen}). Nothing to do.")
+        return
+
+    for gen in range(start_gen, target_gens + 1):
         gen_start_time = time.time()
         # Seed set changes every generation (seed = 1000 * gen + k)
         seeds = [1000 * gen + k for k in range(matches_per_opp)]
@@ -208,7 +232,7 @@ def run_training():
         if args.hands is not None:
             match_hands = args.hands
             match_stage = 1 if match_hands <= 400 else 2
-        elif gen <= max(1, args.gens // 3):
+        elif gen <= max(1, target_gens // 3):
             match_hands = 100
             match_stage = 1
         else:
@@ -219,7 +243,7 @@ def run_training():
         fitnesses = []
         gen_candidates_info = []
 
-        print(f"\n--- Generation {gen:03d} (Seeds: {seeds}, Stage: {match_stage}, Hands: {match_hands}) ---")
+        print(f"\n--- Generation {gen:03d} of {target_gens:03d} (Seeds: {seeds}, Stage: {match_stage}, Hands: {match_hands}) ---")
 
         for idx, cand_vec in enumerate(solutions):
             cand_id = f"gen_{gen:03d}_cand_{idx:02d}"
@@ -296,6 +320,15 @@ def run_training():
         ck_path = os.path.join(out_dir, f"gen_{gen:03d}.json")
         with open(ck_path, "w", encoding="utf-8") as f:
             json.dump(checkpoint_data, f, indent=2)
+
+        # Save CMA-ES optimizer state for exact resume
+        try:
+            with open(os.path.join(out_dir, f"cma_gen_{gen:03d}.pkl"), "wb") as pf:
+                pickle.dump(es, pf)
+            with open(os.path.join(out_dir, "cma_latest.pkl"), "wb") as pf:
+                pickle.dump(es, pf)
+        except Exception as e:
+            print(f"Warning: could not pickle CMA-ES state: {e}")
 
         # Write current best
         with open(os.path.join(out_dir, "best.json"), "w", encoding="utf-8") as f:

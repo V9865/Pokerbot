@@ -1,6 +1,6 @@
 {
   "training_opponents": {
-    "persona": 4,
+    "persona": 3,
     "snapshots/v1_1_bot.py": 3,
     "rof_tight": 2,
     "rof_loose": 2,
@@ -10,13 +10,15 @@
     "exploiter": 2,
     "gto_like": 2,
     "ai_typical_v2": 2,
-    "station": 1,
-    "random_bot": 1,
-    "shover": 1,
-    "maniac": 1,
-    "nit": 1,
-    "minraiser": 1
+    "nit": 1
   },
+  "post_stage_safety_opponents": [
+    "station",
+    "random_bot",
+    "shover",
+    "maniac",
+    "minraiser"
+  ],
   "held_out_opponents": [
     "friend",
     "friend2",

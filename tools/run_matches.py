@@ -84,7 +84,9 @@ def main():
     for o in args.opps.split(","):
         opps += ZOO if o == "all" else [o]
     seeds = parse_seeds(args.seeds)
-    base = os.path.join(ROOT, "runs", args.tag)
+    default_runs = r"C:\pokerbot_runs" if os.name == "nt" else os.path.join(ROOT, "runs")
+    runs_dir = os.environ.get("POKERBOT_RUNS_DIR", default_runs)
+    base = os.path.join(runs_dir, args.tag)
     jobs = []
     for o in opps:
         path = resolve(o)

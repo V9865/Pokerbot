@@ -6,7 +6,12 @@ Groups every hand by how it ended and prints totals, then the worst hands.
 import glob, os, re, sys
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 worst_n = int(sys.argv[sys.argv.index("--worst") + 1]) if "--worst" in sys.argv else 20
-base = args[0] if args else "runs"
+base = args[0] if args else (r"C:\pokerbot_runs" if os.name == "nt" and os.path.isdir(r"C:\pokerbot_runs") else "runs")
+if not os.path.isdir(base):
+    for candidate in [os.path.join(r"C:\pokerbot_runs", base), os.path.join(r"C:\pokerbot_runs", os.path.basename(base))]:
+        if os.path.isdir(candidate):
+            base = candidate
+            break
 opp = args[1] if len(args) > 1 else ""
 LINE = re.compile(r"^(L\d) #(\d+)\s+button (\w) \| (.*) \| board (.*?)(?: \| discards (.*?))? \| (.*) \| (fold|showdown)(?: \((.*?)\))? (\w) ([+-]?\d+), (\w) ([+-]?\d+)$")
 groups, hands = {}, []

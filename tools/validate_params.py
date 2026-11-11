@@ -26,7 +26,9 @@ def run_validation():
         sys.exit(f"Params file not found: {params_path}")
 
     # Build validation variant bot
-    val_bot_dir = os.path.join(ROOT, "runs", "variants")
+    default_runs = r"C:\pokerbot_runs" if os.name == "nt" else os.path.join(ROOT, "runs")
+    runs_dir = os.environ.get("POKERBOT_RUNS_DIR", default_runs)
+    val_bot_dir = os.path.join(runs_dir, "variants")
     os.makedirs(val_bot_dir, exist_ok=True)
     val_bot_path = os.path.join(val_bot_dir, "cand_val_bot.py")
 
@@ -47,6 +49,7 @@ def run_validation():
         train_cfg = json.load(f)
 
     held_out_opps = train_cfg.get("held_out_opponents", ["friend", "liar", "ai_typical", "exploiter2"])
+    safety_opps = train_cfg.get("post_stage_safety_opponents", ["station", "random_bot", "shover", "maniac", "minraiser"])
     
     print("\nRunning Validation against Held-out Opponents...")
     print(f"  Opponents: {held_out_opps} + 30 Personas (5000-5029) + Head-to-Head vs v1_1")
@@ -78,6 +81,21 @@ def run_validation():
         "--tag", "val_personas"
     ]
     subprocess.run(run_persona_cmd)
+
+    # 3. Post-stage safety check (station, random_bot, shover, maniac, minraiser)
+    print("\nRunning Post-Stage Safety Check (forfeits / notices)...")
+    safety_str = ",".join(safety_opps)
+    run_safety_cmd = [
+        sys.executable,
+        os.path.join(ROOT, "tools", "run_matches.py"),
+        "--bot", val_bot_path,
+        "--opps", safety_str,
+        "--seeds", "1-10",
+        "--stage", "2",
+        "--jobs", str(args.jobs),
+        "--tag", "val_safety"
+    ]
+    subprocess.run(run_safety_cmd)
 
 
 if __name__ == "__main__":
