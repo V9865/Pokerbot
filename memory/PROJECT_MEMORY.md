@@ -3,22 +3,25 @@
 Read this first in every conversation. Update it at the end of every phase.
 
 ## 1. Status
-- Phase: Phase 2 Step 2 complete; v2 bot with Bayesian opponent ranges fully tested, passed all acceptance gates and ablations.
-- Current bot: v2 = dist\bot.py = snapshots\v2_bot.py.
-- Uploaded to Unstop: recommended to upload v2 (or keep v1.1 snapshot available).
-- Benchmarks:
-  * Head-to-head vs v1_1 (seeds 1-40, Stage 2): 18-0-22, -0.10 +- 0.20 chips/hand, capped -0.09 (Regression gate PASSED).
-  * Friend held-out check (seeds 1-20, Stage 1): 18-0-2, +1.07 +- 0.51 chips/hand, capped +0.61 (beats v1.1's 16-0-4, +1.02, capped +0.58).
-  * Friend held-out check (seeds 1-20, Stage 2): 19-0-1, +1.40 +- 0.33 chips/hand, capped +0.88 (beats v1.1's 18-0-2, +1.20, capped +0.82).
-  * Full zoo Stage 1 (seeds 1-10): 156-0-4 (97.5% win rate), 0 problems.
-  * Full zoo Stage 2 (seeds 1-10): 159-0-1 (99.4% win rate), 0 problems.
-  * Massive gains vs v1.1: rof_small (+2.01 chips/hand, capped jumps from +0.79 to +1.00), random_bot (+6.83), liar (+1.58), ai_typical (+3.02), ai_typical_v2 (+2.39), rof_big (+1.25), gto_like (+0.55).
-  * Timing: incremental history processing keeps engine time to ~30s per 500-hand leg (bank is 75s), 0 notices, 0 forfeits.
+- Phase: Phase 4 Stage A complete and ACCEPTED (`T_mean`); `v4` (`dist\bot.py` = `snapshots\v4_bot.py`) replaces `v1.1`.
+- Current bot: `v4` = `dist\bot.py` = `snapshots\v4_bot.py` (221,788 bytes; built from `src\policy_params.py` with `T_mean` parameters, no `--params`).
+- Uploaded to Unstop: ready to upload `dist\bot.py` (`v4`); awaiting user upload confirmation.
+- Benchmarks (Stage A validation on fresh seeds `90000+` vs `snapshots\v1_1_bot.py`):
+  * Head-to-head vs `v1_1` (`seeds 90000-90039`, Stage 2): **31-0-9** (`+0.631 ± 0.227` chips/hand, capped **`+0.494`**), 0 problems.
+  * Held-out average (`friend`, `liar`, `ai_typical`, `exploiter2` `seeds 90000-90019`, 30 `persona` `seeds 90000-90029`, Stage 1 & 2, 220 matches): **215/220 (97.73%)**, equal-opp avg capped **`+0.9362`** vs `v1_1` `+0.9089` (match-weighted `+0.9387` vs `+0.9172`, paired raw gain `+0.167 ± 0.214`), 0 win->loss flips.
+  * `friend` held-out (`90000-90019`): Stage 1 **17-0-3** (`+1.50 ± 0.69`, cap `+0.69` vs `v1_1` `15-0-5`, `+0.44`, cap `+0.39`); Stage 2 **18-0-2** (`+1.44 ± 0.47`, cap `+0.77` vs `v1_1` `19-0-1`, `+1.20`, cap `+0.77`).
+  * Safety bots (`station`, `random_bot`, `shover`, `maniac`, `minraiser`, Stage 2 `90000-90004`): **25-0-0** (`+1.00` cap all), 0 notices/forfeits/tracebacks.
+  * Pre-upload gates on `v4` `dist\bot.py`: `test_policy` PASS (`0.251 ms/dec`), `test_history` PASS (`213/213`), `test_evaluator` PASS, `fuzz_protocol` (`3000` normal: max `28.7 ms`; `1500` `--no-numpy`: max `2.5 ms`) PASS, serial `timing_report` Stage 1 max `12.5%` bank (`42.3 ms`), Stage 2 max `12.1%` bank (`34.2 ms`), smoke batch `v4_smoke` (`all` 19 opps × `1-3`) **56-0-1** with 0 problems.
 
 ## 2. Next step
-Upload dist\bot.py (v2) to Unstop. Proceed to Phase 3 policy training.
+Upload `dist\bot.py` (`v4`) to Unstop if desired, then decide whether to run Stage B (postflop structural parameters, starting from accepted `v4` params) or move to Phase 5 final audit.
 
 ## 2b. Change log
+- 2026-11-12 v4 (Phase 4 Stage A trained policy — accepted `T_mean`):
+  * Ran 25 generations of Stage A CMA-ES (`pop=12`, 11 training opponents, 2 matches/opp = 6,600 matches total on `C:\pokerbot_runs\train\stage_a`) in 4.12 hours; 0 forfeits/notices/tracebacks.
+  * Compared final-gen best (`T_best`, `best.json`) and final CMA-ES population mean (`T_mean`, `mean.json` from `cma_latest.pkl`) against `snapshots\v1_1_bot.py` on fresh paired seeds `90000+`. Both passed all Section 8 gates; accepted `T_mean` over `T_best` due to dominant H2H (`31-0-9`, `+0.631` vs `29-0-11`, `+0.250`), positive raw held-out gain (`+0.167` vs `-0.072`), and deterministic `TAU_BET = TAU_ACT = 0.02`.
+  * Key trained moves (`PARAMS` in `src\policy_params.py`): `BETA_MULTI` `0.0 -> 0.2218` (multi-street value term on flop/turn), `PF_CALL_PFR_MULT` `1.30 -> 1.0081` (tighter BB calls vs button opens), `CALL_MARGIN` `0.04 -> 0.0224`, `BIG_CALL_MARGIN` `0.07 -> 0.1070`, `PF_CALL_Q_MED` `0.55 -> 0.4801`, `PF_OPEN_Q` `0.75 -> 0.7713`, `RANGE_BLEND` `0.0 -> 0.0292`, `TAU_BET = TAU_ACT = 0.02` (clamped at lower bound).
+  * Training tooling fixes: kept `tools\train.py` seeds strictly `< 5000` (`100..4899`), saved `mean_params` / `mean.json` in JSON alongside checkpoints to avoid Python/NumPy pickle incompatibility across environments, and separated cap-saturated bots into post-stage validation (`C:\pokerbot_runs\`).
 - 2026-11-11 v2 (Bayesian Opponent Ranges - Phase 2 Step 2):
   * Bayesian ranges: implemented `src/ranges.py` with `Range3` (22,100 combinations) and `Range2` (up to 990 combinations).
   * Preflop: `Range3` updates prior distribution based on learned button raise frequency `pfr_btn` from Fix C and action likelihoods.

@@ -2736,6 +2736,7 @@ class OppModel:
                 if p <= 0.30:
                     self.opp_big_bet_showdown_strong += 1
 
+
 # ==================== policy_params ====================
 """Parameters and bounds for the trained policy.
 Stage A trains at most ~15 parameters. Residual weights stay fixed at 0.
@@ -2764,19 +2765,19 @@ STAGE_A_NAMES = [
 ]
 
 PARAMS = {
-    # Phase 3 trainable parameters
-    "RANGE_BLEND": 0.0,         # 0.0 = pure v1.1 range, 1.0 = pure Bayesian range
-    "BETA_MULTI": 0.0,          # learned weight on multi-street expected pot growth
-    "TAU_BET": 0.02,            # softmax temperature over bet sizes (0.02 = argmax v1.1)
-    "TAU_ACT": 0.02,            # softmax temperature over actions (0.02 = argmax v1.1)
-    "BLUFF_SCALE": 1.0,         # scale factor on bluff frequencies
+    # Phase 3/4 Stage A trained parameters (T_mean)
+    "RANGE_BLEND": 0.029159168123412547,    # 0.0 = pure v1.1 range, 1.0 = pure Bayesian range
+    "BETA_MULTI": 0.22177515053205837,      # learned weight on multi-street expected pot growth
+    "TAU_BET": 0.02,                        # softmax temperature over bet sizes (0.02 = argmax v1.1)
+    "TAU_ACT": 0.02,                        # softmax temperature over actions (0.02 = argmax v1.1)
+    "BLUFF_SCALE": 1.2166361977313247,      # scale factor on bluff frequencies
     # Key postflop thresholds
-    "VALUE_MIN": 0.53,
+    "VALUE_MIN": 0.4789534126888502,
     "VALUE_BIG": 0.66,
-    "CALL_MARGIN": 0.04,
-    "BIG_CALL_MARGIN": 0.07,
-    "RAISE_VALUE": 0.78,
-    "STACK_OFF_EQ": 0.62,
+    "CALL_MARGIN": 0.022390618699661836,
+    "BIG_CALL_MARGIN": 0.10695144132206386,
+    "RAISE_VALUE": 0.7935532718309334,
+    "STACK_OFF_EQ": 0.6241696711750796,
     "OOP_PENALTY": 0.02,
     "UNCERTAINTY": 0.25,
     "EV_MIX_MARGIN": 0.03,
@@ -2787,20 +2788,20 @@ PARAMS = {
     "BLUFF_SIZE": 0.60,
     "ALLIN_IF_STACK_USE": 0.70,
     # Key preflop thresholds
-    "PF_OPEN_Q": 0.75,
+    "PF_OPEN_Q": 0.7713121119219797,
     "PF_OPEN_SIZE": 5.0,
     "PF_ISO_Q": 0.30,
     "PF_ISO_SIZE": 6.0,
-    "PF_3BET_Q": 0.08,
+    "PF_3BET_Q": 0.0880846337014865,
     "PF_4BET_Q": 0.03,
     "PF_5BET_Q": 0.012,
     "PF_CALL_Q_SMALL": 0.80,
-    "PF_CALL_Q_MED": 0.55,
+    "PF_CALL_Q_MED": 0.48012032459748777,
     "PF_CALL_Q_BIG": 0.30,
     "PF_CALL_Q_HUGE": 0.14,
     "PF_CALL_Q_ALLIN": 0.05,
     "PF_SHOVE_ADAPT": 0.47,
-    "PF_CALL_PFR_MULT": 1.30,
+    "PF_CALL_PFR_MULT": 1.0080979520102076,
 }
 
 BOUNDS = {

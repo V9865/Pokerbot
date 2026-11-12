@@ -191,10 +191,12 @@ def run_training():
     if args.resume:
         latest_pkl = os.path.join(out_dir, "cma_latest.pkl")
         checkpoints = sorted(glob.glob(os.path.join(out_dir, "gen_*.json")))
+        loaded_pkl = False
         if os.path.isfile(latest_pkl):
             try:
                 with open(latest_pkl, "rb") as pf:
                     es = pickle.load(pf)
+                loaded_pkl = True
                 print(f"Loaded CMA-ES state from {latest_pkl} (sigma={es.sigma:.4f})")
             except Exception as e:
                 print(f"Could not load {latest_pkl} ({e}), initializing fresh CMA with checkpoint mean")
@@ -204,8 +206,8 @@ def run_training():
                 ck_data = json.load(f)
             start_gen = ck_data["gen"] + 1
             print(f"Resuming from generation {start_gen} (latest checkpoint {latest_ck})")
-            if not os.path.isfile(latest_pkl) and "best_params" in ck_data:
-                x_resume = pack_stage_a(ck_data["best_params"])
+            if not loaded_pkl and ("mean_params" in ck_data or "best_params" in ck_data):
+                x_resume = pack_stage_a(ck_data.get("mean_params") or ck_data["best_params"])
                 sigma_resume = ck_data.get("sigma", 0.15)
                 es = cma.CMAEvolutionStrategy(x_resume, sigma_resume, {
                     "bounds": [0.0, 1.0],
@@ -225,8 +227,8 @@ def run_training():
 
     for gen in range(start_gen, target_gens + 1):
         gen_start_time = time.time()
-        # Seed set changes every generation (seed = 1000 * gen + k)
-        seeds = [1000 * gen + k for k in range(matches_per_opp)]
+        # Keep training seeds strictly < 5000 (below held-out >= 5000 and << 50000)
+        seeds = [100 + ((gen - 1) * max(20, matches_per_opp) + k) % 4800 for k in range(matches_per_opp)]
         
         # Decide match stage length: early short matches (100 hands) in first third, then Stage 1 length (400 hands)
         if args.hands is not None:
@@ -307,7 +309,8 @@ def run_training():
 
         print(f"Gen {gen:03d} finished in {gen_elapsed:.1f} s | Best F: {best_F:+.4f} | Mean F: {mean_F:+.4f}")
 
-        # Save checkpoint
+        # Save checkpoint (including CMA-ES mean in JSON so it is Python/NumPy-version independent)
+        mean_params = unpack_stage_a(es.mean)
         checkpoint_data = {
             "stage": stage_name,
             "gen": gen,
@@ -315,6 +318,7 @@ def run_training():
             "mean_F": mean_F,
             "elapsed_s": gen_elapsed,
             "best_params": best_cand["params"],
+            "mean_params": mean_params,
             "sigma": es.sigma
         }
         ck_path = os.path.join(out_dir, f"gen_{gen:03d}.json")
@@ -330,9 +334,11 @@ def run_training():
         except Exception as e:
             print(f"Warning: could not pickle CMA-ES state: {e}")
 
-        # Write current best
+        # Write current best and CMA-ES mean
         with open(os.path.join(out_dir, "best.json"), "w", encoding="utf-8") as f:
             json.dump(best_cand["params"], f, indent=2)
+        with open(os.path.join(out_dir, "mean.json"), "w", encoding="utf-8") as f:
+            json.dump(mean_params, f, indent=2)
 
         # Log line to TRAINING_LOG.md
         now_iso = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

@@ -302,4 +302,47 @@ Command: `py -3.11 tools\train.py --stage A --gens 1 --pop 12 --matches-per-opp 
 - Average throughput: 4.29 s / match across 8 cores (~0.54 match/sec).
 - Calibrated overnight training plan: fits in 8.5 hours using `--matches-per-opp 2` and 100-hand matches for the first third of generations.
 
+## 2026-11-12 Phase 4 Stage A Validation & Acceptance (v4 = `T_mean`)
+Training run: 25 generations CMA-ES (`pop=12`, 11 opps, 2 matches/opp = 6,600 matches, 4.12 hours), `0` forfeits/notices/tracebacks.
+Candidates compared against `snapshots\v1_1_bot.py` on identical fresh seeds (`90000+`, never used in training; `friend2` not present):
+
+### Stage 1 Held-Out (400 hands/match; `persona` `90000-90029`, fixed `90000-90019`)
+```
+opponent      | v1_1 (W-D-L chips+-CI cap)   | T_best (W-D-L chips+-CI cap) | T_mean (W-D-L chips+-CI cap)
+persona       | 30-0-0    +3.60+-0.56 (+1.00) | 30-0-0    +3.06+-0.59 (+0.97) | 30-0-0    +3.44+-0.72 (+0.94)
+friend        | 15-0-5    +0.44+-0.48 (+0.39) | 18-0-2    +1.64+-0.57 (+0.76) | 17-0-3    +1.50+-0.69 (+0.69)
+liar          | 20-0-0    +3.89+-0.80 (+0.93) | 19-0-1    +3.77+-0.73 (+0.94) | 20-0-0    +4.26+-0.95 (+0.98)
+ai_typical    | 20-0-0    +9.30+-1.03 (+1.00) | 20-0-0    +9.59+-0.81 (+1.00) | 20-0-0   +10.08+-0.84 (+1.00)
+exploiter2    | 20-0-0    +8.02+-1.01 (+1.00) | 20-0-0    +7.61+-1.27 (+1.00) | 20-0-0    +7.87+-1.23 (+1.00)
+```
+
+### Stage 2 Held-Out (1,000 hands/match; `persona` `90000-90029`, fixed `90000-90019`)
+```
+opponent      | v1_1 (W-D-L chips+-CI cap)   | T_best (W-D-L chips+-CI cap) | T_mean (W-D-L chips+-CI cap)
+persona       | 30-0-0    +3.58+-0.47 (+1.00) | 30-0-0    +3.18+-0.52 (+0.99) | 30-0-0    +3.11+-0.53 (+0.99)
+friend        | 19-0-1    +1.20+-0.36 (+0.77) | 19-0-1    +1.21+-0.31 (+0.80) | 18-0-2    +1.44+-0.47 (+0.77)
+liar          | 20-0-0    +4.89+-0.60 (+1.00) | 20-0-0    +5.00+-0.60 (+1.00) | 20-0-0    +4.78+-0.62 (+1.00)
+ai_typical    | 20-0-0    +9.91+-0.66 (+1.00) | 20-0-0    +9.79+-0.63 (+1.00) | 20-0-0   +10.46+-0.56 (+1.00)
+exploiter2    | 20-0-0    +8.05+-0.76 (+1.00) | 20-0-0    +7.69+-0.74 (+1.00) | 20-0-0    +8.08+-0.57 (+1.00)
+```
+
+### Head-to-Head vs `snapshots\v1_1_bot.py` (Stage 2, seeds `90000-90039`, n=40)
+- `T_best`: **29-0-11**, `+0.250 +- 0.176` chips/hand, capped `+0.246`, 0 problems.
+- `T_mean`: **31-0-9**, `+0.631 +- 0.227` chips/hand, capped `+0.494`, 0 problems.
+
+### Safety Bots (Stage 2, seeds `90000-90004`, n=5 each) & Timing
+- `station`, `random_bot`, `shover`, `maniac`, `minraiser`: `5-0-0` (`+1.00` cap) for all three bots; **0 notices, 0 forfeits, 0 tracebacks** across all 285 candidate / 245 baseline validation matches.
+- Serial timing (`--jobs 1`):
+  * Stage 1 (12 legs): `T_best` mean 12.07% / max 14.60% (30.1 ms), `T_mean` mean 11.54% / max 14.90% (30.0 ms).
+  * Stage 2 (18 legs): `T_best` mean 13.06% / max 18.20% (44.3 ms), `T_mean` mean 12.46% / max 17.10% (45.2 ms).
+- Overall acceptance: both pass all Section 8 gates; **`T_mean` accepted as v4** (`dist\bot.py` = `snapshots\v4_bot.py`).
+
+### v4 Pre-Upload Checks (`dist\bot.py`, 221,788 bytes)
+- `tools\test_policy.py`: PASS (`0.251 ms/dec`). `tools\test_history.py`: PASS (`213/213`, 0 mismatches). `tools\test_evaluator.py`: PASS (0 mismatches).
+- `tools\fuzz_protocol.py dist\bot.py 3000`: OK (15,184 reqs, worst 28.7 ms, 47 junk-fuzz caught errors).
+- `tools\fuzz_protocol.py dist\bot.py 1500 250 --no-numpy`: OK (7,552 reqs, worst 2.5 ms, 23 caught errors).
+- `tools\timing_report.py --bot dist\bot.py`: Stage 1 max 12.5% (42.3 ms), Stage 2 max 12.1% (34.2 ms), 100% FULL mode, OK.
+- Smoke batch (`--opps all --seeds 1-3 --tag v4_smoke`): 56-0-1 across all 19 zoo opponents, 0 problems.
+- Parity check vs `C:\pokerbot_runs\variants\T_mean.py`: identical `PARAMS`/`CFG` and 1,000/1,000 identical decisions under synced RNG (note: live 10-seed `friend` runs `v4_vs_friend_10` 6-0-4 `+1.21+-1.18` vs earlier `T_mean` 9-0-1 `+1.51` differ per match due to unseeded RNG in `friend.py` and `MC_FLOP`).
+
 
