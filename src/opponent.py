@@ -388,50 +388,36 @@ class OppModel:
 
         for st, bucket, frac in opp_bets:
             if st == "flop":
-                b = board_ids[:3]
-                if len(b) < 3:
+                if len(board_ids) < 3:
                     continue
+                b_sub = board_ids[:3]   # flop strength on the flop only (no future cards)
                 if len(opp3) == 3:
-                    a, b_k, _ = cheap_keep(opp3, b)
+                    a, b_k, _ = cheap_keep(opp3, b_sub)
                     cards2 = [a, b_k]
                 else:
                     cards2 = opp_hole
-                b4_arr = np.array(b, dtype=np.int64)   # flop strength on the flop only (no future cards)
             elif st == "turn":
                 if len(board_ids) < 4:
                     continue
+                b_sub = board_ids[:4]
                 cards2 = opp_hole
-                b4_arr = np.array(board_ids[:4], dtype=np.int64)
             else:
                 if len(board_ids) < 5:
                     continue
+                b_sub = board_ids[:5]
                 cards2 = opp_hole
-                eval_row = np.array([cards2 + board_ids[:5]], dtype=np.int64)
-                actual_score = eval_batch(eval_row)[0]
-                seen = set(cards2) | set(board_ids[:5])
-                unseen = [c for c in range(52) if c not in seen]
-                opp_rows = []
-                for i in range(len(unseen)):
-                    for j in range(i + 1, len(unseen)):
-                        opp_rows.append([unseen[i], unseen[j]] + board_ids[:5])
-                all_scores = eval_batch(np.array(opp_rows, dtype=np.int64))
-                p = float(np.mean(all_scores > actual_score) + 0.5 * np.mean(all_scores == actual_score))
-                self.opp_bet_sum_p[bucket] += p
-                self.opp_bet_count[bucket] += 1
-                if frac > 0.8:
-                    self.opp_big_bets_faced += 1
-                    if p <= 0.30:
-                        self.opp_big_bet_showdown_strong += 1
-                continue
 
-            seen = set(cards2) | set(board_ids[:len(b4_arr)])
-            unseen = [c for c in range(52) if c not in seen]
-            opp_rows = []
-            for i in range(len(unseen)):
-                for j in range(i + 1, len(unseen)):
-                    opp_rows.append([unseen[i], unseen[j]] + list(b4_arr[:4]))
-            all_scores = eval_batch(np.array(opp_rows, dtype=np.int64))
-            actual_score = eval_batch(np.array([cards2 + list(b4_arr[:4])], dtype=np.int64))[0]
+            seen = set(cards2) | set(b_sub)
+            u_arr = np.array([c for c in range(52) if c not in seen], dtype=np.int64)
+            ii, jj = np.triu_indices(u_arr.size, 1)
+            rows = np.empty((ii.size + 1, 2 + len(b_sub)), dtype=np.int64)
+            rows[:-1, 0] = u_arr[ii]
+            rows[:-1, 1] = u_arr[jj]
+            rows[:-1, 2:] = b_sub
+            rows[-1, :2] = cards2
+            rows[-1, 2:] = b_sub
+            scores = eval_batch(rows)
+            all_scores, actual_score = scores[:-1], scores[-1]
             p = float(np.mean(all_scores > actual_score) + 0.5 * np.mean(all_scores == actual_score))
             self.opp_bet_sum_p[bucket] += p
             self.opp_bet_count[bucket] += 1

@@ -345,4 +345,25 @@ exploiter2    | 20-0-0    +8.05+-0.76 (+1.00) | 20-0-0    +7.69+-0.74 (+1.00) | 
 - Smoke batch (`--opps all --seeds 1-3 --tag v4_smoke`): 56-0-1 across all 19 zoo opponents, 0 problems.
 - Parity check vs `C:\pokerbot_runs\variants\T_mean.py`: identical `PARAMS`/`CFG` and 1,000/1,000 identical decisions under synced RNG (note: live 10-seed `friend` runs `v4_vs_friend_10` 6-0-4 `+1.21+-1.18` vs earlier `T_mean` 9-0-1 `+1.51` differ per match due to unseeded RNG in `friend.py` and `MC_FLOP`).
 
+## 2026-11-12 Branch `v5`: Audit Merge & 4-Variant Fix-Set Selection (`Stage 1`, seeds `91000+`)
+Merged `origin/audit-fixes` into branch `v5` (from `v4` `1b79597`), keeping `T_mean` `PARAMS` and switching `STAGE_A_NAMES` to train `UNCERTAINTY` and `OOP_PENALTY` instead of unused `VALUE_MIN` and `BLUFF_SCALE` (with `STACK_OFF_EQ` wired in `Brain._bet` and vectorized `observe_showdown` at `0.970 ms`).
+Tested 4 variants (`RAISE_EV=False`, `USE_FREQ_FLOOR=False`, `T_mean` PARAMS) on Stage 1 fresh seeds `91000-91019` (n=20 each) + H2H vs `snapshots\v4_bot.py` (`91000-91039`, n=40):
+```
+opp            | v4 (W-D-L cap+-CI)     | A (T,T)                | B (T,F)                | C (F,T)                | D (F,F)
+friend         | 16-0-4  +0.59+-0.29    | 17-0-3  +0.61+-0.23    | 15-0-5  +0.50+-0.31    | 17-0-3  +0.66+-0.28    | 17-0-3  +0.67+-0.19
+gto_like       | 18-0-2  +0.78+-0.23    | 18-0-2  +0.74+-0.20    | 17-0-3  +0.64+-0.30    | 17-1-2  +0.76+-0.19    | 19-0-1  +0.78+-0.18
+liar           | 19-0-1  +0.95+-0.10    | 20-0-0  +0.96+-0.05    | 20-0-0  +1.00+-0.00    | 20-0-0  +0.92+-0.08    | 20-0-0  +0.97+-0.04
+rof_big        | 20-0-0  +1.00+-0.00    | 20-0-0  +1.00+-0.00    | 20-0-0  +1.00+-0.00    | 20-0-0  +1.00+-0.00    | 18-0-2  +0.82+-0.18
+exploiter2     | 20-0-0  +1.00+-0.00    | 20-0-0  +1.00+-0.00    | 20-0-0  +1.00+-0.00    | 20-0-0  +1.00+-0.00    | 20-0-0  +1.00+-0.00
+ai_typical_v2  | 20-0-0  +1.00+-0.00    | 20-0-0  +1.00+-0.00    | 20-0-0  +1.00+-0.00    | 20-0-0  +1.00+-0.00    | 20-0-0  +1.00+-0.00
+persona        | 20-0-0  +0.99+-0.02    | 20-0-0  +1.00+-0.00    | 20-0-0  +0.97+-0.05    | 20-0-0  +1.00+-0.00    | 20-0-0  +0.95+-0.06
+Field avg cap  |                +0.8998 |                +0.9006 |                +0.8731 |                +0.9052 |                +0.8833
+```
+H2H vs `snapshots\v4_bot.py` (`91000-91039`, Stage 1, n=40):
+- `A (FIX_BUCKET=True,  PF_3BET_SCALE=True)`:  33-0-7, raw `+0.662+-0.274`, cap `+0.497+-0.167`, 0 problems, 0 flips.
+- `B (FIX_BUCKET=True,  PF_3BET_SCALE=False)`: 28-0-12, raw `+0.500+-0.236`, cap `+0.377+-0.174`, 0 problems, 0 flips.
+- `C (FIX_BUCKET=False, PF_3BET_SCALE=True)`:  23-0-17, raw `-0.015+-0.255`, cap `+0.025+-0.200`, 0 problems, 0 flips.
+- `D (FIX_BUCKET=False, PF_3BET_SCALE=False)`: 21-0-19, raw `+0.063+-0.268`, cap `+0.051+-0.226`, 0 problems, 0 flips.
+Selected **Variant C** (`FIX_BUCKET=False`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`) per highest field average (`+0.9052`), H2H not negative beyond CI (`23-0-17`, `-0.015+-0.255`), and 0 win->loss flips. Set defaults in `src\config.py` and rebuilt `dist\bot.py`.
+
 

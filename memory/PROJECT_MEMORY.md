@@ -3,20 +3,18 @@
 Read this first in every conversation. Update it at the end of every phase.
 
 ## 1. Status
-- Phase: Phase 4 Stage A complete and ACCEPTED (`T_mean`); `v4` (`dist\bot.py` = `snapshots\v4_bot.py`) replaces `v1.1`.
-- Current bot: `v4` = `dist\bot.py` = `snapshots\v4_bot.py` (221,788 bytes; built from `src\policy_params.py` with `T_mean` parameters, no `--params`).
-- Uploaded to Unstop: ready to upload `dist\bot.py` (`v4`); awaiting user upload confirmation.
-- Benchmarks (Stage A validation on fresh seeds `90000+` vs `snapshots\v1_1_bot.py`):
-  * Head-to-head vs `v1_1` (`seeds 90000-90039`, Stage 2): **31-0-9** (`+0.631 ± 0.227` chips/hand, capped **`+0.494`**), 0 problems.
-  * Held-out average (`friend`, `liar`, `ai_typical`, `exploiter2` `seeds 90000-90019`, 30 `persona` `seeds 90000-90029`, Stage 1 & 2, 220 matches): **215/220 (97.73%)**, equal-opp avg capped **`+0.9362`** vs `v1_1` `+0.9089` (match-weighted `+0.9387` vs `+0.9172`, paired raw gain `+0.167 ± 0.214`), 0 win->loss flips.
-  * `friend` held-out (`90000-90019`): Stage 1 **17-0-3** (`+1.50 ± 0.69`, cap `+0.69` vs `v1_1` `15-0-5`, `+0.44`, cap `+0.39`); Stage 2 **18-0-2** (`+1.44 ± 0.47`, cap `+0.77` vs `v1_1` `19-0-1`, `+1.20`, cap `+0.77`).
-  * Safety bots (`station`, `random_bot`, `shover`, `maniac`, `minraiser`, Stage 2 `90000-90004`): **25-0-0** (`+1.00` cap all), 0 notices/forfeits/tracebacks.
-  * Pre-upload gates on `v4` `dist\bot.py`: `test_policy` PASS (`0.251 ms/dec`), `test_history` PASS (`213/213`), `test_evaluator` PASS, `fuzz_protocol` (`3000` normal: max `28.7 ms`; `1500` `--no-numpy`: max `2.5 ms`) PASS, serial `timing_report` Stage 1 max `12.5%` bank (`42.3 ms`), Stage 2 max `12.1%` bank (`34.2 ms`), smoke batch `v4_smoke` (`all` 19 opps × `1-3`) **56-0-1** with 0 problems.
+- Phase: Branch `v5` created (`v4` + merged `origin/audit-fixes`); Variant `C` (`FIX_BUCKET=False`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`) chosen by 4-variant test (`+0.9052` field avg cap, `23-0-17` H2H vs `v4`). Ready for overnight Stage A retraining (`stage_a_v5`).
+- Live/safe `v4` bot: `master` (`1b79597`, pushed to `origin/master`) and `snapshots\v4_bot.py` untouched (`221,788` bytes).
+- Branch `v5` bot: `dist\bot.py` (`225,520` bytes) with Variant `C` switches + `T_mean` `PARAMS` + `observe_showdown` vectorized (`0.970 ms`).
 
 ## 2. Next step
-Upload `dist\bot.py` (`v4`) to Unstop if desired, then decide whether to run Stage B (postflop structural parameters, starting from accepted `v4` params) or move to Phase 5 final audit.
+Run overnight Stage A retraining on branch `v5` (25 generations, starting CMA mean at `T_mean`, `sigma0 = 0.10`, training `UNCERTAINTY` and `OOP_PENALTY` instead of `VALUE_MIN`/`BLUFF_SCALE`, seeds `< 4900`, tag `stage_a_v5`), then validate held-out before replacing `v4`.
 
 ## 2b. Change log
+- 2026-11-12 Branch `v5` (Audit merge + fix-set selection, pre-retrain):
+  * Merged `origin/audit-fixes` (`3a69e0e`) onto `v4` (`1b79597`) while keeping `T_mean` `PARAMS` and switching `STAGE_A_NAMES` to train `UNCERTAINTY` and `OOP_PENALTY`. Vectorized `OppModel.observe_showdown` in `src\opponent.py` (~4x speedup: `3.73 ms` -> `0.97 ms`, passing `test_v11.py`).
+  * Evaluated 4 fix combinations (`A/B/C/D`, `T_mean` params, Stage 1 seeds `91000-91019` on 7-opp field + `91000-91039` H2H vs `v4`). Selected Variant `C` (`FIX_BUCKET=False`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`): best field avg capped **`+0.9052`** (vs `A` `+0.9006`, `v4` `+0.8998`, `D` `+0.8833`, `B` `+0.8731`), H2H vs `v4` `23-0-17` (`-0.015+-0.255`, cap `+0.025+-0.200`), 0 flips, 0 problems.
+  * Added `--sigma0` and `--tag` flags to `tools\train.py` for clean `stage_a_v5` retraining (`sigma0=0.10`, seeds `< 4900`).
 - 2026-11-12 v4 (Phase 4 Stage A trained policy — accepted `T_mean`):
   * Ran 25 generations of Stage A CMA-ES (`pop=12`, 11 training opponents, 2 matches/opp = 6,600 matches total on `C:\pokerbot_runs\train\stage_a`) in 4.12 hours; 0 forfeits/notices/tracebacks.
   * Compared final-gen best (`T_best`, `best.json`) and final CMA-ES population mean (`T_mean`, `mean.json` from `cma_latest.pkl`) against `snapshots\v1_1_bot.py` on fresh paired seeds `90000+`. Both passed all Section 8 gates; accepted `T_mean` over `T_best` due to dominant H2H (`31-0-9`, `+0.631` vs `29-0-11`, `+0.250`), positive raw held-out gain (`+0.167` vs `-0.072`), and deterministic `TAU_BET = TAU_ACT = 0.02`.

@@ -141,6 +141,8 @@ def run_training():
     parser.add_argument("--dry-run", action="store_true", help="Quick dry run (pop 4, hands 40)")
     parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
     parser.add_argument("--matches-per-opp", type=int, default=None, help="Matches per opponent per gen")
+    parser.add_argument("--sigma0", type=float, default=0.15, help="Initial CMA-ES step size sigma0")
+    parser.add_argument("--tag", default=None, help="Subdirectory tag under runs/train/ (default: stage_<stage>)")
     args = parser.parse_args()
 
     if not HAVE_CMA:
@@ -167,12 +169,13 @@ def run_training():
     stage_name = args.stage
     default_runs = r"C:\pokerbot_runs" if os.name == "nt" else os.path.join(ROOT, "runs")
     runs_dir = os.environ.get("POKERBOT_RUNS_DIR", default_runs)
-    out_dir = os.path.join(runs_dir, "train", f"stage_{stage_name.lower()}")
+    run_tag = args.tag or f"stage_{stage_name.lower()}"
+    out_dir = os.path.join(runs_dir, "train", run_tag)
     os.makedirs(out_dir, exist_ok=True)
 
     print("=" * 60)
     print(f"CMA-ES Policy Training - Stage {stage_name}")
-    print(f"  Population: {args.pop}, Target Generations: {args.gens}, Jobs: {args.jobs}")
+    print(f"  Population: {args.pop}, Target Generations: {args.gens}, Jobs: {args.jobs}, Sigma0: {args.sigma0}")
     print(f"  Opponents: {len(resolved_opps)} (Total weight: {tot_weight})")
     print(f"  Matches per opponent: {matches_per_opp}")
     print(f"  Output directory: {out_dir}")
@@ -180,7 +183,7 @@ def run_training():
 
     # Initial vector in unit cube
     x0 = pack_stage_a(PARAMS)
-    sigma0 = 0.15
+    sigma0 = float(args.sigma0)
     es = cma.CMAEvolutionStrategy(x0, sigma0, {
         "bounds": [0.0, 1.0],
         "popsize": args.pop,

@@ -52,7 +52,7 @@ CFG = {
     "SHRINK_BET_SMALL": 0.75, "SHRINK_BET_MED": 0.60, "SHRINK_BET_LARGE": 0.50, "SHRINK_BET_OVER": 0.40,
     "SHRINK_RAISE_EXTRA": 0.80, "SHRINK_CALL": 0.85, "SHRINK_FLOOR": 0.08,
     "SHRINK_PRIOR_WEIGHT": 6,
-    "FIX_BUCKET": True,         # record our bet sizes in the right response bucket (v1.1 had a bug)
+    "FIX_BUCKET": False,        # selected by v5 fix-set test (Variant C: best field avg +0.9052, 23-17 H2H vs v4)
     "RAISE_EV": False,           # bet EV counts what we win when raised with a strong hand (v1.1: always -b)
     "PF_3BET_SCALE": True,      # BB 3-bet width scales with the button's raise frequency
     "USE_FREQ_FLOOR": False,     # range kept after their bet/raise >= FREQ_FLOOR_MULT x how often they bet/raise
