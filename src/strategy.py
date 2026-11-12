@@ -52,12 +52,15 @@ def read_history(history, seat, opp):
             else:
                 frac = (amt - my_bet) / max(1.0, pot + (my_bet - opp_bet))
                 if opp is not None and hasattr(opp, "shrink"):
-                    x *= opp.shrink(frac)
+                    m = opp.shrink(frac)
                 else:
-                    x *= (CFG["SHRINK_BET_SMALL"] if frac < 0.4 else CFG["SHRINK_BET_MED"] if frac < 0.8 else
-                          CFG["SHRINK_BET_LARGE"] if frac < 1.3 else CFG["SHRINK_BET_OVER"])
+                    m = (CFG["SHRINK_BET_SMALL"] if frac < 0.4 else CFG["SHRINK_BET_MED"] if frac < 0.8 else
+                         CFG["SHRINK_BET_LARGE"] if frac < 1.3 else CFG["SHRINK_BET_OVER"])
                 if my_bet > 0:
-                    x *= CFG["SHRINK_RAISE_EXTRA"]
+                    m *= CFG["SHRINK_RAISE_EXTRA"]
+                if opp is not None and CFG.get("USE_FREQ_FLOOR", False) and hasattr(opp, "action_floor"):
+                    m = max(m, opp.action_floor(st, my_bet > 0, frac))
+                x *= m
             pot += amt - opp_bet
             opp_bet = amt
         elif act == "call":
@@ -174,7 +177,8 @@ class Brain:
                             flop_my_bet = amt
                     else:  # opp
                         if act == "raise" and amt is not None:
-                            self.bayes_range.update_range2(board_ids[:3], "raise", amt - flop_opp_bet, flop_pot)
+                            self.bayes_range.update_range2(board_ids[:3], "raise", amt - flop_opp_bet, flop_pot,
+                                                           street="flop", facing=flop_my_bet > 0)
                             flop_pot += amt - flop_opp_bet
                             flop_opp_bet = amt
                         elif act == "call":
@@ -213,7 +217,8 @@ class Brain:
                 else:
                     if self.bayes_range.w2 is not None and st in ("turn", "river"):
                         st_board = board_ids[:4] if st == "turn" else board_ids[:5]
-                        self.bayes_range.update_range2(st_board, "raise", amt - self.bayes_opp_bet, self.bayes_pot)
+                        self.bayes_range.update_range2(st_board, "raise", amt - self.bayes_opp_bet, self.bayes_pot,
+                                                       street=st, facing=self.bayes_my_bet > 0)
                 self.bayes_pot += amt - self.bayes_opp_bet
                 self.bayes_opp_bet = amt
             elif act == "call":
@@ -323,7 +328,7 @@ class Brain:
             if pf_raises == 1:
                 t3 = CFG["PF_3BET_Q"]
                 if self.seat == "big_blind":
-                    t3 = min(t3, 0.30 * self.opp.pfr_btn())
+                    t3 = t3 * clamp(self.opp.pfr_btn() / 0.45, 0.5, 2.0)
                 if q <= t3:
                     return {"action": "raise", "amount": min(hi, 3 * opp_bet)}
             if pf_raises == 2 and q <= CFG["PF_4BET_Q"]:
@@ -340,7 +345,7 @@ class Brain:
         lo, hi = req["min_raise"], req["max_raise"]
         amount = int(round(req.get("opp_bet", 0) + frac * (req["pot"] + req.get("to_call", 0))))
         if amount >= CFG["ALLIN_IF_STACK_USE"] * hi:
-            if e_r >= CFG["STACK_OFF_EQ"]:
+            if e_r >= float(PARAMS.get("STACK_OFF_EQ", CFG["STACK_OFF_EQ"])):
                 amount = hi
             else:
                 amount = int(0.45 * hi)

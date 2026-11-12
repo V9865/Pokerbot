@@ -68,6 +68,12 @@ class OppModel:
         # Big bet honesty tracking: fraction of big bets (> 0.8 pot) showing top 30% strength
         self.opp_big_bets_faced = 0
         self.opp_big_bet_showdown_strong = 0
+        # Betting frequency (no showdown needed): [opportunities, bets] per street when
+        # not facing a bet, and [times facing our bet, raises]. Floors the range share
+        # kept after a bet, so an opponent who bets most hands is not read as strong.
+        self.bet_opps = {"flop": [0, 0], "turn": [0, 0], "river": [0, 0]}
+        self.raise_opps = [0, 0]
+        self.bet_size_counts = [0, 0, 0, 0]   # their bets (not facing ours) by size bucket
 
     def p_lowest(self):
         return self.discard_rule_probs[0]
@@ -94,6 +100,36 @@ class OppModel:
 
     def big_bet_honesty(self):
         return (self.opp_big_bet_showdown_strong + 2.0 * 0.50) / (self.opp_big_bets_faced + 2.0)
+
+    def bet_freq(self, street):
+        n, k = self.bet_opps.get(street, (0, 0))
+        w = float(CFG["FREQ_PRIOR_WEIGHT"])
+        return (k + w * CFG["FREQ_PRIOR_BET"]) / (n + w)
+
+    def raise_freq(self):
+        n, k = self.raise_opps
+        w = float(CFG["FREQ_PRIOR_WEIGHT"])
+        return (k + w * CFG["FREQ_PRIOR_RAISE"]) / (n + w)
+
+    def size_freq(self, frac):
+        """How often they bet THIS size when they could bet (all streets pooled)."""
+        n = sum(v[0] for v in self.bet_opps.values())
+        k = self.bet_size_counts[bet_bucket(frac)]
+        w = float(CFG["FREQ_PRIOR_WEIGHT"])
+        return (k + w * 0.08) / (n + w)
+
+    def action_floor(self, street, facing, frac=None):
+        """Minimum share of their range that an opponent bet (facing=False) or
+        raise (facing=True) can represent, from how often they take that action.
+        For bets the frequency of that bet SIZE is used, so a bot that bets often
+        but makes big bets rarely still has its big bets read as strong."""
+        if facing:
+            f = self.raise_freq()
+        elif frac is not None and CFG.get("FREQ_FLOOR_BY_SIZE", True):
+            f = self.size_freq(frac)
+        else:
+            f = self.bet_freq(street)
+        return clamp(CFG["FREQ_FLOOR_MULT"] * f, 0.0, 0.95)
 
     def shrink(self, frac):
         k = bet_bucket(frac)
@@ -196,7 +232,10 @@ class OppModel:
             st, who, act = e.get("street"), e.get("actor"), e.get("action")
             if st != street:
                 street, facing = st, False
-                my_bet, opp_bet = (1, 2) if my_seat == "button" else (2, 1) if st == "preflop" else (0, 0)
+                if st == "preflop" or (my_seat == "button" and not CFG.get("FIX_BUCKET", True)):
+                    my_bet, opp_bet = (1, 2) if my_seat == "button" else (2, 1)
+                else:
+                    my_bet, opp_bet = 0, 0
                 last_our_bucket = None
                 last_our_grid_idx = None
 
@@ -204,8 +243,11 @@ class OppModel:
             if who == "me":
                 if act == "raise" and amt is not None:
                     if st != "preflop":
-                        pot_facing = max(1.0, pot - (amt - my_bet))
-                        frac = (amt - opp_bet) / pot_facing
+                        # size of our bet/raise relative to the pot after we call theirs
+                        if CFG.get("FIX_BUCKET", True):
+                            frac = (amt - opp_bet) / max(1.0, pot + (opp_bet - my_bet))
+                        else:   # v1.1 behaviour (records sizes in the wrong bucket)
+                            frac = (amt - opp_bet) / max(1.0, pot - (amt - my_bet))
                         last_our_bucket = bet_bucket(frac)
                         last_our_grid_idx = nearest_grid_idx(frac)
                     pot += amt - my_bet
@@ -237,6 +279,18 @@ class OppModel:
                 self.post_actions += 1
                 if act == "raise":
                     self.post_aggr += 1
+                if act in ("check", "raise", "call", "fold"):
+                    if facing:
+                        self.raise_opps[0] += 1
+                        if act == "raise":
+                            self.raise_opps[1] += 1
+                    elif st in self.bet_opps and act in ("check", "raise"):
+                        self.bet_opps[st][0] += 1
+                        if act == "raise":
+                            self.bet_opps[st][1] += 1
+                            if amt is not None:
+                                bf = (amt - my_bet) / max(1.0, pot + (my_bet - opp_bet))
+                                self.bet_size_counts[bet_bucket(bf)] += 1
                 if facing:
                     self.bets_faced += 1
                     if act == "fold":
@@ -342,7 +396,7 @@ class OppModel:
                     cards2 = [a, b_k]
                 else:
                     cards2 = opp_hole
-                b4_arr = np.array(b + [board_ids[3]] if len(board_ids) > 3 else b + [51], dtype=np.int64)
+                b4_arr = np.array(b, dtype=np.int64)   # flop strength on the flop only (no future cards)
             elif st == "turn":
                 if len(board_ids) < 4:
                     continue

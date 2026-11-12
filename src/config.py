@@ -51,7 +51,14 @@ CFG = {
     "SHRINK_PF_RAISE": 0.85, "SHRINK_PF_3BET": 0.50, "SHRINK_PF_4BET": 0.35,
     "SHRINK_BET_SMALL": 0.75, "SHRINK_BET_MED": 0.60, "SHRINK_BET_LARGE": 0.50, "SHRINK_BET_OVER": 0.40,
     "SHRINK_RAISE_EXTRA": 0.80, "SHRINK_CALL": 0.85, "SHRINK_FLOOR": 0.08,
-    "SHRINK_PRIOR_WEIGHT": 6,   # prior weight for learning opponent bet-size shrinkage
+    "SHRINK_PRIOR_WEIGHT": 6,
+    "FIX_BUCKET": True,         # record our bet sizes in the right response bucket (v1.1 had a bug)
+    "RAISE_EV": False,           # bet EV counts what we win when raised with a strong hand (v1.1: always -b)
+    "PF_3BET_SCALE": True,      # BB 3-bet width scales with the button's raise frequency
+    "USE_FREQ_FLOOR": False,     # range kept after their bet/raise >= FREQ_FLOOR_MULT x how often they bet/raise
+    "FREQ_FLOOR_MULT": 0.9,
+    "FREQ_FLOOR_BY_SIZE": True, # floor uses how often they bet that SIZE (False: any bet size)
+    "FREQ_PRIOR_BET": 0.35, "FREQ_PRIOR_RAISE": 0.12, "FREQ_PRIOR_WEIGHT": 10,   # prior weight for learning opponent bet-size shrinkage
     # ---- opponent model
     "STAT_N0": 10,              # prior weight for smoothed frequencies
     "STATION_FOLD": 0.15,       # fold-to-bet below this (after STATION_MIN bets) = calling station
