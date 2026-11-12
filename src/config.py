@@ -53,9 +53,9 @@ CFG = {
     "SHRINK_RAISE_EXTRA": 0.80, "SHRINK_CALL": 0.85, "SHRINK_FLOOR": 0.08,
     "SHRINK_PRIOR_WEIGHT": 6,
     "FIX_BUCKET": True,         # record our bet sizes in the right response bucket (v1.1 had a bug)
-    "RAISE_EV": True,           # bet EV counts what we win when raised with a strong hand (v1.1: always -b)
+    "RAISE_EV": False,           # bet EV counts what we win when raised with a strong hand (v1.1: always -b)
     "PF_3BET_SCALE": True,      # BB 3-bet width scales with the button's raise frequency
-    "USE_FREQ_FLOOR": True,     # range kept after their bet/raise >= FREQ_FLOOR_MULT x how often they bet/raise
+    "USE_FREQ_FLOOR": False,     # range kept after their bet/raise >= FREQ_FLOOR_MULT x how often they bet/raise
     "FREQ_FLOOR_MULT": 0.9,
     "FREQ_FLOOR_BY_SIZE": True, # floor uses how often they bet that SIZE (False: any bet size)
     "FREQ_PRIOR_BET": 0.35, "FREQ_PRIOR_RAISE": 0.12, "FREQ_PRIOR_WEIGHT": 10,   # prior weight for learning opponent bet-size shrinkage
