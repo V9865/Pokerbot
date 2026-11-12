@@ -13,7 +13,7 @@ ZOO = [
     "station", "random_bot", "shover", "maniac", "nit", "minraiser",
     "ai_typical", "ai_typical_v2", "gto_like", "raise_or_fold",
     "rof_tight", "rof_loose", "rof_big", "rof_small", "liar", "friend",
-    "persona", "exploiter", "exploiter2"
+    "persona", "exploiter", "exploiter2", "lag"
 ]
 
 

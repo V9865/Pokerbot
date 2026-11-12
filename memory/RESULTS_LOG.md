@@ -364,6 +364,6 @@ H2H vs `snapshots\v4_bot.py` (`91000-91039`, Stage 1, n=40):
 - `B (FIX_BUCKET=True,  PF_3BET_SCALE=False)`: 28-0-12, raw `+0.500+-0.236`, cap `+0.377+-0.174`, 0 problems, 0 flips.
 - `C (FIX_BUCKET=False, PF_3BET_SCALE=True)`:  23-0-17, raw `-0.015+-0.255`, cap `+0.025+-0.200`, 0 problems, 0 flips.
 - `D (FIX_BUCKET=False, PF_3BET_SCALE=False)`: 21-0-19, raw `+0.063+-0.268`, cap `+0.051+-0.226`, 0 problems, 0 flips.
-Selected **Variant C** (`FIX_BUCKET=False`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`) per highest field average (`+0.9052`), H2H not negative beyond CI (`23-0-17`, `-0.015+-0.255`), and 0 win->loss flips. Set defaults in `src\config.py` and rebuilt `dist\bot.py`.
+Selected **Variant A** (`FIX_BUCKET=True`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`): field averages of A (`+0.9006`), C (`+0.9052`), and v4 (`+0.8998`) differ by ~0.005 (within noise), and A is the only variant that beats `v4` head-to-head beyond its CI (`33-0-7`, capped `+0.497+-0.167`) while matching or beating `v4` vs every field opponent (0 flips, 0 problems). Set defaults in `src\config.py` and rebuilt `dist\bot.py`.
 
 

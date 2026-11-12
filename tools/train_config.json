@@ -1,7 +1,7 @@
 {
   "training_opponents": {
     "persona": 3,
-    "snapshots/v1_1_bot.py": 3,
+    "snapshots/v4_bot.py": 3,
     "rof_tight": 2,
     "rof_loose": 2,
     "rof_big": 2,
@@ -10,6 +10,8 @@
     "exploiter": 2,
     "gto_like": 2,
     "ai_typical_v2": 2,
+    "lag": 2,
+    "snapshots/v1_1_bot.py": 1,
     "nit": 1
   },
   "post_stage_safety_opponents": [

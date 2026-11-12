@@ -3,18 +3,25 @@
 Read this first in every conversation. Update it at the end of every phase.
 
 ## 1. Status
-- Phase: Branch `v5` created (`v4` + merged `origin/audit-fixes`); Variant `C` (`FIX_BUCKET=False`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`) chosen by 4-variant test (`+0.9052` field avg cap, `23-0-17` H2H vs `v4`). Ready for overnight Stage A retraining (`stage_a_v5`).
+- Phase: Branch `v5` ready for overnight Stage A retrain (`stage_a_v5`); Variant `A` (`FIX_BUCKET=True`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`) chosen over `C` by H2H tie-breaker (`33-0-7`, capped `+0.50 ± 0.17` vs `v4`, field avg `+0.9006` tied within noise with `C` `+0.9052` and `v4` `+0.8998`).
 - Live/safe `v4` bot: `master` (`1b79597`, pushed to `origin/master`) and `snapshots\v4_bot.py` untouched (`221,788` bytes).
-- Branch `v5` bot: `dist\bot.py` (`225,520` bytes) with Variant `C` switches + `T_mean` `PARAMS` + `observe_showdown` vectorized (`0.970 ms`).
+- Branch `v5` pre-retrain bot (`v5_A_untrained`): `dist\bot.py` with Variant `A` switches + `T_mean` `PARAMS` + `observe_showdown` vectorized.
+- Training pool (`tools\train_config.json`, total weight 26, max weight `3/26 = 11.5% <= 15%`): `persona` (3), `snapshots\v4_bot.py` (3), `lag` (2), `rof_*` / `raise_or_fold` / `exploiter` / `gto_like` / `ai_typical_v2` (2 each), `snapshots\v1_1_bot.py` (1), `nit` (1).
 
 ## 2. Next step
-Run overnight Stage A retraining on branch `v5` (25 generations, starting CMA mean at `T_mean`, `sigma0 = 0.10`, training `UNCERTAINTY` and `OOP_PENALTY` instead of `VALUE_MIN`/`BLUFF_SCALE`, seeds `< 4900`, tag `stage_a_v5`), then validate held-out before replacing `v4`.
+1. Run overnight Stage A retraining on branch `v5` (`stage_a_v5`, 25 gens, `sigma0 = 0.10`, starting CMA mean at `T_mean` `PARAMS`, training `UNCERTAINTY` & `OOP_PENALTY`, seeds `< 4900`).
+2. Tomorrow: validate THREE bots against `snapshots\v4_bot.py` on fresh seeds `92000-92039` (never used):
+   - `v5_A_untrained` (Variant `A` code + `T_mean` `PARAMS`)
+   - `T5_mean` (CMA mean of the final generation)
+   - `T5_best` (final `best.json`)
+   - Held-out set (`30` personas from seeds `92000+`, `friend`, `friend2`/`friend_b` if present, `liar`, `ai_typical`, `exploiter2`) on Stage 1 and Stage 2; head-to-head vs `v4` (Stage 2, 40 seeds `92000-92039`); safety bots (`station`, `random_bot`, `shover`, `maniac`, `minraiser`); timing gate (`< 40%` bank per leg, worst single reply `< 1 s`).
+   - Apply Section 8 acceptance rule with `v4` as the live version; when field averages tie within noise, decide by head-to-head. Recommend at most one bot to replace `v4`.
 
 ## 2b. Change log
-- 2026-11-12 Branch `v5` (Audit merge + fix-set selection, pre-retrain):
+- 2026-11-12 Branch `v5` (Audit merge + Variant A fix set + pool vs v4):
   * Merged `origin/audit-fixes` (`3a69e0e`) onto `v4` (`1b79597`) while keeping `T_mean` `PARAMS` and switching `STAGE_A_NAMES` to train `UNCERTAINTY` and `OOP_PENALTY`. Vectorized `OppModel.observe_showdown` in `src\opponent.py` (~4x speedup: `3.73 ms` -> `0.97 ms`, passing `test_v11.py`).
-  * Evaluated 4 fix combinations (`A/B/C/D`, `T_mean` params, Stage 1 seeds `91000-91019` on 7-opp field + `91000-91039` H2H vs `v4`). Selected Variant `C` (`FIX_BUCKET=False`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`): best field avg capped **`+0.9052`** (vs `A` `+0.9006`, `v4` `+0.8998`, `D` `+0.8833`, `B` `+0.8731`), H2H vs `v4` `23-0-17` (`-0.015+-0.255`, cap `+0.025+-0.200`), 0 flips, 0 problems.
-  * Added `--sigma0` and `--tag` flags to `tools\train.py` for clean `stage_a_v5` retraining (`sigma0=0.10`, seeds `< 4900`).
+  * Evaluated 4 fix combinations (`A/B/C/D`, `T_mean` params, Stage 1 seeds `91000-91019` on 7-opp field + `91000-91039` H2H vs `v4`). Field averages of `A` (`+0.9006`), `C` (`+0.9052`), and `v4` (`+0.8998`) tied within ~0.005 noise; selected **Variant `A`** (`FIX_BUCKET=True`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`) because `A` is the only variant that beat `v4` head-to-head beyond its CI (`33-0-7`, raw `+0.662 ± 0.274`, capped `+0.497 ± 0.167`) and matched or beat `v4` vs every field opponent (0 flips, 0 problems).
+  * Updated training pool in `tools\train_config.json` to target `snapshots\v4_bot.py` (weight 3), keep `snapshots\v1_1_bot.py` (weight 1), and add `opponents\lag.py` (weight 2), max weight `11.5% <= 15%`. Added `--sigma0` and `--tag` flags to `tools\train.py` (`sigma0=0.10`, seeds `< 4900`).
 - 2026-11-12 v4 (Phase 4 Stage A trained policy — accepted `T_mean`):
   * Ran 25 generations of Stage A CMA-ES (`pop=12`, 11 training opponents, 2 matches/opp = 6,600 matches total on `C:\pokerbot_runs\train\stage_a`) in 4.12 hours; 0 forfeits/notices/tracebacks.
   * Compared final-gen best (`T_best`, `best.json`) and final CMA-ES population mean (`T_mean`, `mean.json` from `cma_latest.pkl`) against `snapshots\v1_1_bot.py` on fresh paired seeds `90000+`. Both passed all Section 8 gates; accepted `T_mean` over `T_best` due to dominant H2H (`31-0-9`, `+0.631` vs `29-0-11`, `+0.250`), positive raw held-out gain (`+0.167` vs `-0.072`), and deterministic `TAU_BET = TAU_ACT = 0.02`.
@@ -88,6 +95,7 @@ Run overnight Stage A retraining on branch `v5` (25 generations, starting CMA me
   * Stage A parameter scope: trains at most ~15 parameters (RANGE_BLEND, BETA_MULTI, TAU_BET, TAU_ACT, and ~10 key v1.1 thresholds). Residual weights fixed at 0 overnight.
   * Warm start pass condition: head-to-head vs v1_1 over 40 seeds Stage 2 with wins between 16 and 24 and mean within its 95% CI of zero.
   * Acceptance rule: average capped chips across ALL held-out opponents improves, win share does not fall, no win becomes a clear loss, and head-to-head vs live is not worse. No single opponent (friend included) decides acceptance alone.
+- 2026-11-12 (user): When field averages are within noise, decide by head-to-head. Selected Variant A (`FIX_BUCKET=True`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`) on branch `v5` because A, C, and v4 tie within ~0.005 field-avg noise while A beats v4 head-to-head beyond CI (`33-0-7`, cap `+0.50 +- 0.17`).
 
 ## 4. Facts and lessons
 - Step 1b evaluation: greedy single-street EV over a size grid gets stuck (never tries the size the opponent calls) and loses multi-street value; capped chips fell 0.1-0.24 vs gto_like, rof variants, liar and friend. Fix belongs in the trained policy (multi-street value term e.g. learned weight x pot growth on flop/turn + softmax with learned temperature during training).

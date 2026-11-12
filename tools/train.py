@@ -155,8 +155,10 @@ def run_training():
 
     raw_opps = train_cfg["training_opponents"]
     tot_weight = sum(raw_opps.values())
-    opp_weights = {k: v / tot_weight for k, v in raw_opps.items()}
-    resolved_opps = [(k, resolve_opp(k)) for k in raw_opps.keys()]
+    opp_weights = {os.path.splitext(os.path.basename(k))[0]: v / tot_weight for k, v in raw_opps.items()}
+    resolved_opps = [(os.path.splitext(os.path.basename(k))[0], resolve_opp(k)) for k in raw_opps.keys()]
+    assert abs(sum(opp_weights.values()) - 1.0) < 1e-9, f"Weight sum error: {opp_weights}"
+    assert max(opp_weights.values()) <= 0.15 + 1e-9, f"Opponent weight > 15%: {opp_weights}"
 
     if args.dry_run:
         args.gens = 1
@@ -289,10 +291,15 @@ def run_training():
 
             # Calculate weighted F
             weighted_F = 0.0
+            used_w = 0.0
             for opp_name, scores in opp_scores.items():
                 w = opp_weights.get(opp_name, 0.0)
+                if w <= 0.0:
+                    raise RuntimeError(f"Unweighted opponent {opp_name!r} in opp_scores!")
+                used_w += w
                 mean_sc = sum(scores) / len(scores) if scores else -10.0
                 weighted_F += w * mean_sc
+            assert abs(used_w - 1.0) < 1e-6, f"Used weights {used_w} != 1.0 (missing opponent?)"
 
             fitnesses.append(-weighted_F) # CMA minimizes -F
             gen_candidates_info.append({
