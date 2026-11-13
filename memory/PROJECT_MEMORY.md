@@ -3,18 +3,19 @@
 Read this first in every conversation. Update it at the end of every phase.
 
 ## 1. Status
-- Phase: v5 live. Accepted `v5_A_untrained` (Variant A audit fixes + `T_mean` PARAMS).
-- Decision reasoning: `T5_best` and `T5_mean` were rejected because they trained against `v4` (weight 3), so their head-to-head vs `v4` is not independent, and both underperformed `v4` on the held-out field (`+0.8882` and `+0.8773` vs `v4` `+0.9170`). In contrast, `v5_A_untrained` uses Variant A code fixes on top of independent `T_mean` PARAMS: it ties the held-out field within noise (`+0.9086` vs `+0.9170`, diff `-0.0084`), achieves a higher held-out win share (`97.27%`, 214/220 wins vs `v4` 213/220), and dominates `v4` head-to-head `35-0-5` (`+0.799 ± 0.204` chips/hand, capped `+0.630`).
-- Live `v5` bot: `dist\bot.py` and `snapshots\v5_bot.py`.
-- Previous baseline: `snapshots\v4_bot.py` (`1b79597`, `221,788` bytes).
-- Parity: `dist\bot.py` verified 100% decision-identical to `C:\pokerbot_runs\variants\v5_A_untrained.py` on 1,000 test spots.
+- Phase: v5 live. (Variant A2 tested on branch `v6` and rejected; v5 retained).
+- Live `v5` bot: `dist\bot.py` and `snapshots\v5_bot.py` (size `229,207` bytes CRLF / `225,545` bytes LF; SHA-256 CRLF `fcc3b02c87a108ac9ee2119d0b219b81577f9ec0c8643b6408d3dd8d60c7b5da`, LF `33b31b7b9c6044c1c54bfaddf46308a726c6695186573d2837ad6039268e3a30`).
+- Experiment Variant A2 (`PF_3BET_WIDEN_ONLY` on branch `v6`): Evaluated on fresh seeds 93000-93039 vs `snapshots\v5_bot.py`. Result: Tied on field capped chips (+0.9002 vs +0.9047, $\Delta = -0.0045$), lower held-out win share (212 vs 213, 96.36% vs 96.82%), and tied head-to-head vs `v5` (19-1-20, +0.038 $\pm$ 0.150 chips/hand). Rejected under Section 8 rule with head-to-head tie breaker; `v5` left as is.
+- Parity: `dist\bot.py` verified 100% decision-identical to `v5_A_untrained.py` on 1,000 test spots.
 - Timing: Stage 1 max 14.70% bank (worst reply 32.2 ms); Stage 2 max 15.47% bank (worst reply 35.4 ms). Zero problems across all tests, fuzzing, and smoke matches.
 
 ## 2. Next step
-1. Run `tools\analyze_log.py` on the Stage 2 Friend matches (seeds 92000-92019) for `v4` vs `v5` to isolate where `v5` wins fewer chips by street and action (bluffs, folds, value bets, sizing). Report only (no code change).
-2. Stage B preparation if planned (residual policy training, or opponent-specific tuning).
+1. Stage B preparation if planned (residual policy training, or opponent-specific tuning).
 
 ## 2b. Change log
+- 2026-11-13 Variant A2 test (PF_3BET_WIDEN_ONLY on branch v6 - rejected):
+  * Evaluated `t3 = min(PF_3BET_Q, 0.30 * pfr) if pfr < 0.45 else PF_3BET_Q * min(2.0, pfr / 0.45)` against `v5_bot.py` on fresh seeds 93000-93039.
+  * Held-out field average capped chips tied (+0.9002 vs +0.9047, $\Delta = -0.0045$), held-out win share dropped (212 vs 213), and H2H vs `v5` was dead heat 19-1-20 (+0.038 $\pm$ 0.150 chips/hand). Rejected; `master` left unchanged at `v5`.
 - 2026-11-13 v5: audit fixes on T_mean (variant A):
   * Merged `origin/audit-fixes` and selected Variant A (`FIX_BUCKET=True`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`) with `T_mean` `PARAMS`.
   * Evaluated 3 candidates against `v4` on fresh seeds 92000-92039. Rejected `T5_best` and `T5_mean` (overfit to training pool containing `v4` at weight 3, lower held-out field chips).
