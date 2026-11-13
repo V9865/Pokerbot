@@ -3,21 +3,22 @@
 Read this first in every conversation. Update it at the end of every phase.
 
 ## 1. Status
-- Phase: Branch `v5` ready for overnight Stage A retrain (`stage_a_v5`); Variant `A` (`FIX_BUCKET=True`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`) chosen over `C` by H2H tie-breaker (`33-0-7`, capped `+0.50 ± 0.17` vs `v4`, field avg `+0.9006` tied within noise with `C` `+0.9052` and `v4` `+0.8998`).
-- Live/safe `v4` bot: `master` (`1b79597`, pushed to `origin/master`) and `snapshots\v4_bot.py` untouched (`221,788` bytes).
-- Branch `v5` pre-retrain bot (`v5_A_untrained`): `dist\bot.py` with Variant `A` switches + `T_mean` `PARAMS` + `observe_showdown` vectorized.
-- Training pool (`tools\train_config.json`, total weight 26, max weight `3/26 = 11.5% <= 15%`): `persona` (3), `snapshots\v4_bot.py` (3), `lag` (2), `rof_*` / `raise_or_fold` / `exploiter` / `gto_like` / `ai_typical_v2` (2 each), `snapshots\v1_1_bot.py` (1), `nit` (1).
+- Phase: v5 live. Accepted `v5_A_untrained` (Variant A audit fixes + `T_mean` PARAMS).
+- Decision reasoning: `T5_best` and `T5_mean` were rejected because they trained against `v4` (weight 3), so their head-to-head vs `v4` is not independent, and both underperformed `v4` on the held-out field (`+0.8882` and `+0.8773` vs `v4` `+0.9170`). In contrast, `v5_A_untrained` uses Variant A code fixes on top of independent `T_mean` PARAMS: it ties the held-out field within noise (`+0.9086` vs `+0.9170`, diff `-0.0084`), achieves a higher held-out win share (`97.27%`, 214/220 wins vs `v4` 213/220), and dominates `v4` head-to-head `35-0-5` (`+0.799 ± 0.204` chips/hand, capped `+0.630`).
+- Live `v5` bot: `dist\bot.py` and `snapshots\v5_bot.py`.
+- Previous baseline: `snapshots\v4_bot.py` (`1b79597`, `221,788` bytes).
+- Parity: `dist\bot.py` verified 100% decision-identical to `C:\pokerbot_runs\variants\v5_A_untrained.py` on 1,000 test spots.
+- Timing: Stage 1 max 14.70% bank (worst reply 32.2 ms); Stage 2 max 15.47% bank (worst reply 35.4 ms). Zero problems across all tests, fuzzing, and smoke matches.
 
 ## 2. Next step
-1. Run overnight Stage A retraining on branch `v5` (`stage_a_v5`, 25 gens, `sigma0 = 0.10`, starting CMA mean at `T_mean` `PARAMS`, training `UNCERTAINTY` & `OOP_PENALTY`, seeds `< 4900`).
-2. Tomorrow: validate THREE bots against `snapshots\v4_bot.py` on fresh seeds `92000-92039` (never used):
-   - `v5_A_untrained` (Variant `A` code + `T_mean` `PARAMS`)
-   - `T5_mean` (CMA mean of the final generation)
-   - `T5_best` (final `best.json`)
-   - Held-out set (`30` personas from seeds `92000+`, `friend`, `friend2`/`friend_b` if present, `liar`, `ai_typical`, `exploiter2`) on Stage 1 and Stage 2; head-to-head vs `v4` (Stage 2, 40 seeds `92000-92039`); safety bots (`station`, `random_bot`, `shover`, `maniac`, `minraiser`); timing gate (`< 40%` bank per leg, worst single reply `< 1 s`).
-   - Apply Section 8 acceptance rule with `v4` as the live version; when field averages tie within noise, decide by head-to-head. Recommend at most one bot to replace `v4`.
+1. Run `tools\analyze_log.py` on the Stage 2 Friend matches (seeds 92000-92019) for `v4` vs `v5` to isolate where `v5` wins fewer chips by street and action (bluffs, folds, value bets, sizing). Report only (no code change).
+2. Stage B preparation if planned (residual policy training, or opponent-specific tuning).
 
 ## 2b. Change log
+- 2026-11-13 v5: audit fixes on T_mean (variant A):
+  * Merged `origin/audit-fixes` and selected Variant A (`FIX_BUCKET=True`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`) with `T_mean` `PARAMS`.
+  * Evaluated 3 candidates against `v4` on fresh seeds 92000-92039. Rejected `T5_best` and `T5_mean` (overfit to training pool containing `v4` at weight 3, lower held-out field chips).
+  * Accepted `v5_A_untrained` as `v5`: 1000/1000 spot parity against bundled variant, all unit tests passed, protocol fuzz passed (31.2 ms normal, 3.9 ms `--no-numpy`), 20-opp smoke batch 57-0-3 with 0 problems, serial timing well under 40% and 1 s limits. Snapshotted `snapshots\v5_bot.py`.
 - 2026-11-12 Branch `v5` (Audit merge + Variant A fix set + pool vs v4):
   * Merged `origin/audit-fixes` (`3a69e0e`) onto `v4` (`1b79597`) while keeping `T_mean` `PARAMS` and switching `STAGE_A_NAMES` to train `UNCERTAINTY` and `OOP_PENALTY`. Vectorized `OppModel.observe_showdown` in `src\opponent.py` (~4x speedup: `3.73 ms` -> `0.97 ms`, passing `test_v11.py`).
   * Evaluated 4 fix combinations (`A/B/C/D`, `T_mean` params, Stage 1 seeds `91000-91019` on 7-opp field + `91000-91039` H2H vs `v4`). Field averages of `A` (`+0.9006`), `C` (`+0.9052`), and `v4` (`+0.8998`) tied within ~0.005 noise; selected **Variant `A`** (`FIX_BUCKET=True`, `PF_3BET_SCALE=True`, `RAISE_EV=False`, `USE_FREQ_FLOOR=False`) because `A` is the only variant that beat `v4` head-to-head beyond its CI (`33-0-7`, raw `+0.662 ± 0.274`, capped `+0.497 ± 0.167`) and matched or beat `v4` vs every field opponent (0 flips, 0 problems).
