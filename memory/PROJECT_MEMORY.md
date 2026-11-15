@@ -3,16 +3,25 @@
 Read this first in every conversation. Update it at the end of every phase.
 
 ## 1. Status
-- Phase: v5 live. (Variant A2 tested on branch `v6` and rejected; v5 retained).
-- Live `v5` bot: `dist\bot.py` and `snapshots\v5_bot.py` (size `229,207` bytes CRLF / `225,545` bytes LF; SHA-256 CRLF `fcc3b02c87a108ac9ee2119d0b219b81577f9ec0c8643b6408d3dd8d60c7b5da`, LF `33b31b7b9c6044c1c54bfaddf46308a726c6695186573d2837ad6039268e3a30`).
-- Experiment Variant A2 (`PF_3BET_WIDEN_ONLY` on branch `v6`): Evaluated on fresh seeds 93000-93039 vs `snapshots\v5_bot.py`. Result: Tied on field capped chips (+0.9002 vs +0.9047, $\Delta = -0.0045$), lower held-out win share (212 vs 213, 96.36% vs 96.82%), and tied head-to-head vs `v5` (19-1-20, +0.038 $\pm$ 0.150 chips/hand). Rejected under Section 8 rule with head-to-head tie breaker; `v5` left as is.
-- Parity: `dist\bot.py` verified 100% decision-identical to `v5_A_untrained.py` on 1,000 test spots.
-- Timing: Stage 1 max 14.70% bank (worst reply 32.2 ms); Stage 2 max 15.47% bank (worst reply 35.4 ms). Zero problems across all tests, fuzzing, and smoke matches.
+- Phase: v6 live (Final submission). Accepted `short-match` faster showdown learning (`SM_LEARN`).
+- Live `v6` bot: `dist\bot.py` and `snapshots\v6_bot.py` (size `227,123` bytes; SHA-256 `4ab2668901145baa082afb2d72c4cf6b3e25fecf5a23bd98358f0e4aadd67d27`).
+- Decision reasoning: `short-match` branch (`SM_ON=True`, `SM_LEARN=True`: prior weight 3 instead of 6, clamp $\pm 0.35$ until 12 showdowns instead of $\pm 0.22$ until 30) evaluated against `snapshots\v5_bot.py` across 200-hand matches on fresh seeds 95000-95039 (held-out set) and 95100-95199 (100-match head-to-head vs v5).
+  * Rule 1 (Total held-out wins $\ge$ v5): 321 vs 319 wins (89.17% vs 88.61%, +2 wins) -> PASS.
+  * Rule 2 (No opponent drops by > 3 wins): friend (+3), gto_like (-3), liar (0), lag (-1), rof_big (0), nit (+1), ai_typical (0), exploiter2 (-1), persona (+3). Max drop is 3 on gto_like ($\le 3$) -> PASS.
+  * Rule 3 (Head-to-head not negative beyond 95% CI): 48-0-52, $-0.169 \pm 0.208$ chips/hand (capped $-0.151$), CI contains 0.0 -> PASS.
+- Previous baseline: `snapshots\v5_bot.py` (`125da97`).
+- Parity: `dist\bot.py` bit-for-bit identical to bundled variant (`227,123` bytes).
+- Timing: Stage 1 and Stage 2 worst reply under 200 ms (max ~161.9 ms, well below 1.0 s hard gate); bank share serial zero-contention well within allowances; 0 notices, 0 forfeits, 0 tracebacks across all tests, fuzzing, and smoke matches.
 
 ## 2. Next step
-1. Stage B preparation if planned (residual policy training, or opponent-specific tuning).
+1. Final tournament upload with `dist\bot.py` (tagged `final-submission`).
 
 ## 2b. Change log
+- 2026-11-15 v6: short-match faster showdown learning (SM_LEARN) - accepted:
+  * Merged `origin/short-match` (`SM_ON=True`, `SM_LEARN=True`: `SM_PRIOR_WEIGHT=3`, `SM_CLAMP=0.35`, `SM_CLAMP_N=12`).
+  * Validated against `snapshots\v5_bot.py` on fresh seeds 95000-95039 (200-hand matches) and 95100-95199 (100 matches H2H).
+  * Surpassed v5 on total held-out matches won (321 vs 319, +2), friend (+3 wins, +2.48 vs +1.45 chips/hand), persona (+3 wins); no opponent dropped > 3 wins; H2H tied within noise (-0.169 $\pm$ 0.208).
+  * Passed all unit tests, fuzz protocol (normal + `--no-numpy`), smoke batch (58-0-2, 0 problems), and serial timing gate. Rebuilt `dist\bot.py`, snapshotted `snapshots\v6_bot.py`, tagged `final-submission`.
 - 2026-11-13 Variant A2 test (PF_3BET_WIDEN_ONLY on branch v6 - rejected):
   * Evaluated `t3 = min(PF_3BET_Q, 0.30 * pfr) if pfr < 0.45 else PF_3BET_Q * min(2.0, pfr / 0.45)` against `v5_bot.py` on fresh seeds 93000-93039.
   * Held-out field average capped chips tied (+0.9002 vs +0.9047, $\Delta = -0.0045$), held-out win share dropped (212 vs 213), and H2H vs `v5` was dead heat 19-1-20 (+0.038 $\pm$ 0.150 chips/hand). Rejected; `master` left unchanged at `v5`.

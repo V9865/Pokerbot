@@ -55,6 +55,16 @@ CFG = {
     "SHRINK_BET_SMALL": 0.75, "SHRINK_BET_MED": 0.60, "SHRINK_BET_LARGE": 0.50, "SHRINK_BET_OVER": 0.40,
     "SHRINK_RAISE_EXTRA": 0.80, "SHRINK_CALL": 0.85, "SHRINK_FLOOR": 0.08,
     "SHRINK_PRIOR_WEIGHT": 6,
+    # Short-match mode (200-hand matches): sound defaults that need no data.
+    "SM_ON": True,               # master switch for the short-match changes below
+    "SM_PRIORS": False, "SM_LEARN": True, "SM_UFACE": False, "SM_CALLX": False,  # individual parts
+    "SM_SHRINK": (0.62, 0.46, 0.34, 0.26),  # range kept after a small/med/large/over bet before data (honest-bettor default)
+    "SM_PRIOR_WEIGHT": 3,        # showdowns of weight on that default (learn faster)
+    "SM_CLAMP": 0.35,            # max learned move from the default until SM_CLAMP_N showdowns
+    "SM_CLAMP_N": 12,
+    "SM_U_FACING": 0.05,         # weight on the unfiltered range when FACING a bet (was UNCERTAINTY)
+    "SM_CALL_EXTRA": (0.04, 0.03, 0.02),  # extra equity to call on flop / turn / river (realisation, reverse implied odds)
+    "SM_OOP_EXTRA": 0.02,        # further extra when out of position before the river
     "FIX_BUCKET": True,         # selected by v5 fix-set test (Variant A: ties field +0.9006 vs C +0.9052, crushes v4 H2H 33-0-7 +0.50 cap)
     "RAISE_EV": False,           # bet EV counts what we win when raised with a strong hand (v1.1: always -b)
     "PF_3BET_SCALE": True,      # BB 3-bet width scales with the button's raise frequency
@@ -2492,17 +2502,21 @@ class OppModel:
 
     def shrink(self, frac):
         k = bet_bucket(frac)
-        priors = (CFG["SHRINK_BET_SMALL"], CFG["SHRINK_BET_MED"], CFG["SHRINK_BET_LARGE"], CFG["SHRINK_BET_OVER"])
+        sm = CFG.get("SM_ON", False)
+        priors = CFG["SM_SHRINK"] if (sm and CFG.get("SM_PRIORS", True)) else (CFG["SHRINK_BET_SMALL"], CFG["SHRINK_BET_MED"],
+                                               CFG["SHRINK_BET_LARGE"], CFG["SHRINK_BET_OVER"])
         prior = priors[k]
         cnt = self.opp_bet_count[k]
         if cnt == 0:
             return prior
         mean_p = self.opp_bet_sum_p[k] / cnt
         s_raw = clamp(2.0 * mean_p, 0.08, 1.0)
-        w = float(CFG["SHRINK_PRIOR_WEIGHT"])
+        learn = sm and CFG.get("SM_LEARN", True)
+        w = float(CFG["SM_PRIOR_WEIGHT"] if learn else CFG["SHRINK_PRIOR_WEIGHT"])
         s = clamp((cnt * s_raw + w * prior) / (cnt + w), 0.08, 1.0)
-        if cnt < 30:
-            s = clamp(s, prior - 0.22, prior + 0.22)
+        lim, n_lim = (CFG["SM_CLAMP"], CFG["SM_CLAMP_N"]) if learn else (0.22, 30)
+        if cnt < n_lim:
+            s = clamp(s, prior - lim, prior + lim)
         return s
 
     def response_rates(self, bucket):
@@ -3060,6 +3074,8 @@ def decide_postflop(req, brain, mode, x, params, rng):
 
     x_eff = (1.0 - blend) * x + blend * 1.0
     u = params.get("UNCERTAINTY", 0.25)
+    if CFG.get("SM_ON", False) and CFG.get("SM_UFACE", True) and req.get("to_call", 0) > 0:
+        u = min(u, CFG["SM_U_FACING"])
     e_r = (1.0 - u) * top(x_eff) + u * e_all
     if brain.seat != "button":
         e_r -= params.get("OOP_PENALTY", 0.02)
@@ -3142,6 +3158,10 @@ def decide_postflop(req, brain, mode, x, params, rng):
     need = to_call / float(pot + to_call)
     big_call = to_call > 0.4 * max(1, req.get("my_stack", 200))
     margin = params.get("BIG_CALL_MARGIN", 0.07) if big_call else params.get("CALL_MARGIN", 0.04)
+    if CFG.get("SM_ON", False) and CFG.get("SM_CALLX", True) and street >= 3:
+        margin += CFG["SM_CALL_EXTRA"][min(2, street - 3)]
+        if street < 5 and brain.seat != "button":
+            margin += CFG["SM_OOP_EXTRA"]
 
     if can_raise and e_r >= params.get("RAISE_VALUE", 0.78):
         b = brain._bet(req, CFG["BET_BIG"], e_r)
