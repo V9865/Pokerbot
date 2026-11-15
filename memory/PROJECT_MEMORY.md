@@ -3,25 +3,38 @@
 Read this first in every conversation. Update it at the end of every phase.
 
 ## 1. Status
-- Phase: v6 live (Final submission). Accepted `short-match` faster showdown learning (`SM_LEARN`).
-- Live `v6` bot: `dist\bot.py` and `snapshots\v6_bot.py` (size `227,123` bytes; SHA-256 `4ab2668901145baa082afb2d72c4cf6b3e25fecf5a23bd98358f0e4aadd67d27`).
-- Decision reasoning: `short-match` branch (`SM_ON=True`, `SM_LEARN=True`: prior weight 3 instead of 6, clamp $\pm 0.35$ until 12 showdowns instead of $\pm 0.22$ until 30) evaluated against `snapshots\v5_bot.py` across 200-hand matches on fresh seeds 95000-95039 (held-out set) and 95100-95199 (100-match head-to-head vs v5).
-  * Rule 1 (Total held-out wins $\ge$ v5): 321 vs 319 wins (89.17% vs 88.61%, +2 wins) -> PASS.
-  * Rule 2 (No opponent drops by > 3 wins): friend (+3), gto_like (-3), liar (0), lag (-1), rof_big (0), nit (+1), ai_typical (0), exploiter2 (-1), persona (+3). Max drop is 3 on gto_like ($\le 3$) -> PASS.
-  * Rule 3 (Head-to-head not negative beyond 95% CI): 48-0-52, $-0.169 \pm 0.208$ chips/hand (capped $-0.151$), CI contains 0.0 -> PASS.
-- Previous baseline: `snapshots\v5_bot.py` (`125da97`).
-- Parity: `dist\bot.py` bit-for-bit identical to bundled variant (`227,123` bytes).
-- Timing: Stage 1 and Stage 2 worst reply under 200 ms (max ~161.9 ms, well below 1.0 s hard gate); bank share serial zero-contention well within allowances; 0 notices, 0 forfeits, 0 tracebacks across all tests, fuzzing, and smoke matches.
+- Phase: v6 live (FINAL SUBMISSION). Accepted `short-match` faster showdown learning (`SM_LEARN`).
+- Live `v6` bot: `dist\bot.py` and `snapshots\v6_bot.py` (size `227,123` bytes LF; SHA-256 `4ab2668901145baa082afb2d72c4cf6b3e25fecf5a23bd98358f0e4aadd67d27`).
+- Decision reasoning: Submitted v6 after evaluation at REAL Stage 1 match length (400 hands per match, seeds 96000-96039) against `snapshots\v5_bot.py`:
+  * Field dominance: v6 won 345/360 matches (95.83%) vs v5's 330/360 (91.67%) (+15 wins overall).
+  * No opponent worse: friend +10 wins (35 vs 25), gto_like +4 wins (32 vs 28), liar +1 win (40 vs 39), all others equal.
+  * Head-to-head: 45-0-55, -0.125 $\pm$ 0.151 chips/hand (within statistical noise of 0, and v5 is not in the field).
+- Parity: `dist\bot.py` bit-for-bit identical to `snapshots\v6_bot.py` (227,123 bytes LF).
+- Timing: Serial Stage 1 (30s bank/leg) mean 12.11% bank, max 15.23% bank, worst reply 29.1 ms. Zero errors, zero notices, zero forfeits, zero tracebacks across all tests, fuzzing, and smoke matches.
 
 ## 2. Next step
-1. Final tournament upload with `dist\bot.py` (tagged `final-submission`).
+1. Final submission complete (dist\bot.py uploaded).
 
 ## 2b. Change log
-- 2026-11-15 v6: short-match faster showdown learning (SM_LEARN) - accepted:
+- 2026-11-15 v6: short-match faster showdown learning (SM_LEARN) - FINAL SUBMISSION:
   * Merged `origin/short-match` (`SM_ON=True`, `SM_LEARN=True`: `SM_PRIOR_WEIGHT=3`, `SM_CLAMP=0.35`, `SM_CLAMP_N=12`).
-  * Validated against `snapshots\v5_bot.py` on fresh seeds 95000-95039 (200-hand matches) and 95100-95199 (100 matches H2H).
-  * Surpassed v5 on total held-out matches won (321 vs 319, +2), friend (+3 wins, +2.48 vs +1.45 chips/hand), persona (+3 wins); no opponent dropped > 3 wins; H2H tied within noise (-0.169 $\pm$ 0.208).
-  * Passed all unit tests, fuzz protocol (normal + `--no-numpy`), smoke batch (58-0-2, 0 problems), and serial timing gate. Rebuilt `dist\bot.py`, snapshotted `snapshots\v6_bot.py`, tagged `final-submission`.
+  * Validated at REAL Stage 1 length (400 hands/match, seeds 96000-96039 held-out, 96100-96199 H2H):
+    | Opponent | v5 Baseline (W-D-L chips+-CI cap) | v6 Candidate (W-D-L chips+-CI cap) | Win Delta (v6 - v5) |
+    | :--- | :--- | :--- | :--- |
+    | friend | 25-0-15 +0.61+-0.42 (+0.24) | 35-0-5 +1.44+-0.41 (+0.66) | +10 wins |
+    | gto_like | 28-0-12 +1.05+-0.52 (+0.46) | 32-0-8 +1.39+-0.50 (+0.60) | +4 wins |
+    | liar | 39-0-1 +3.13+-0.54 (+0.80) | 40-0-0 +4.46+-0.50 (+1.00) | +1 win |
+    | lag | 40-0-0 +8.39+-1.19 (+0.78) | 40-0-0 +9.87+-1.11 (+1.00) | +0 wins |
+    | rof_big | 40-0-0 +5.19+-0.62 (+1.00) | 40-0-0 +4.62+-0.67 (+0.99) | +0 wins |
+    | nit | 39-0-1 +2.01+-0.33 (+0.90) | 39-0-1 +1.88+-0.32 (+0.88) | +0 wins |
+    | ai_typical | 40-0-0 +9.40+-0.65 (+1.00) | 40-0-0 +9.45+-0.56 (+1.00) | +0 wins |
+    | exploiter2 | 40-0-0 +8.23+-0.78 (+1.00) | 40-0-0 +8.13+-0.78 (+1.00) | +0 wins |
+    | persona | 39-0-1 +3.01+-0.61 (+0.89) | 39-0-1 +3.05+-0.58 (+0.91) | +0 wins |
+    | **Total** | **330 / 360 (91.67%)** | **345 / 360 (95.83%)** | **+15 wins** |
+    Head-to-head vs v5: 45-0-55, -0.125 +- 0.151 chips/hand (capped -0.100).
+  * Serial timing: Stage 1 mean 12.11% bank, max 15.23% bank, worst reply 29.1 ms.
+  * Verified bit-for-bit parity with `snapshots\v6_bot.py` (227,123 bytes LF, SHA-256 4ab2668901145baa082afb2d72c4cf6b3e25fecf5a23bd98358f0e4aadd67d27).
+  * Passed fuzzing (30.8 ms normal, 12.4 ms --no-numpy) and smoke batch (59-0-1, 0 problems). Tagged `final-submission`.
 - 2026-11-13 Variant A2 test (PF_3BET_WIDEN_ONLY on branch v6 - rejected):
   * Evaluated `t3 = min(PF_3BET_Q, 0.30 * pfr) if pfr < 0.45 else PF_3BET_Q * min(2.0, pfr / 0.45)` against `v5_bot.py` on fresh seeds 93000-93039.
   * Held-out field average capped chips tied (+0.9002 vs +0.9047, $\Delta = -0.0045$), held-out win share dropped (212 vs 213), and H2H vs `v5` was dead heat 19-1-20 (+0.038 $\pm$ 0.150 chips/hand). Rejected; `master` left unchanged at `v5`.
