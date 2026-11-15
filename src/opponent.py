@@ -133,17 +133,21 @@ class OppModel:
 
     def shrink(self, frac):
         k = bet_bucket(frac)
-        priors = (CFG["SHRINK_BET_SMALL"], CFG["SHRINK_BET_MED"], CFG["SHRINK_BET_LARGE"], CFG["SHRINK_BET_OVER"])
+        sm = CFG.get("SM_ON", False)
+        priors = CFG["SM_SHRINK"] if (sm and CFG.get("SM_PRIORS", True)) else (CFG["SHRINK_BET_SMALL"], CFG["SHRINK_BET_MED"],
+                                               CFG["SHRINK_BET_LARGE"], CFG["SHRINK_BET_OVER"])
         prior = priors[k]
         cnt = self.opp_bet_count[k]
         if cnt == 0:
             return prior
         mean_p = self.opp_bet_sum_p[k] / cnt
         s_raw = clamp(2.0 * mean_p, 0.08, 1.0)
-        w = float(CFG["SHRINK_PRIOR_WEIGHT"])
+        learn = sm and CFG.get("SM_LEARN", True)
+        w = float(CFG["SM_PRIOR_WEIGHT"] if learn else CFG["SHRINK_PRIOR_WEIGHT"])
         s = clamp((cnt * s_raw + w * prior) / (cnt + w), 0.08, 1.0)
-        if cnt < 30:
-            s = clamp(s, prior - 0.22, prior + 0.22)
+        lim, n_lim = (CFG["SM_CLAMP"], CFG["SM_CLAMP_N"]) if learn else (0.22, 30)
+        if cnt < n_lim:
+            s = clamp(s, prior - lim, prior + lim)
         return s
 
     def response_rates(self, bucket):

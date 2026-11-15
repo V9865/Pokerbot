@@ -52,6 +52,16 @@ CFG = {
     "SHRINK_BET_SMALL": 0.75, "SHRINK_BET_MED": 0.60, "SHRINK_BET_LARGE": 0.50, "SHRINK_BET_OVER": 0.40,
     "SHRINK_RAISE_EXTRA": 0.80, "SHRINK_CALL": 0.85, "SHRINK_FLOOR": 0.08,
     "SHRINK_PRIOR_WEIGHT": 6,
+    # Short-match mode (200-hand matches): sound defaults that need no data.
+    "SM_ON": True,               # master switch for the short-match changes below
+    "SM_PRIORS": False, "SM_LEARN": True, "SM_UFACE": False, "SM_CALLX": False,  # individual parts
+    "SM_SHRINK": (0.62, 0.46, 0.34, 0.26),  # range kept after a small/med/large/over bet before data (honest-bettor default)
+    "SM_PRIOR_WEIGHT": 3,        # showdowns of weight on that default (learn faster)
+    "SM_CLAMP": 0.35,            # max learned move from the default until SM_CLAMP_N showdowns
+    "SM_CLAMP_N": 12,
+    "SM_U_FACING": 0.05,         # weight on the unfiltered range when FACING a bet (was UNCERTAINTY)
+    "SM_CALL_EXTRA": (0.04, 0.03, 0.02),  # extra equity to call on flop / turn / river (realisation, reverse implied odds)
+    "SM_OOP_EXTRA": 0.02,        # further extra when out of position before the river
     "FIX_BUCKET": True,         # selected by v5 fix-set test (Variant A: ties field +0.9006 vs C +0.9052, crushes v4 H2H 33-0-7 +0.50 cap)
     "RAISE_EV": False,           # bet EV counts what we win when raised with a strong hand (v1.1: always -b)
     "PF_3BET_SCALE": True,      # BB 3-bet width scales with the button's raise frequency

@@ -112,6 +112,8 @@ def decide_postflop(req, brain, mode, x, params, rng):
 
     x_eff = (1.0 - blend) * x + blend * 1.0
     u = params.get("UNCERTAINTY", 0.25)
+    if CFG.get("SM_ON", False) and CFG.get("SM_UFACE", True) and req.get("to_call", 0) > 0:
+        u = min(u, CFG["SM_U_FACING"])
     e_r = (1.0 - u) * top(x_eff) + u * e_all
     if brain.seat != "button":
         e_r -= params.get("OOP_PENALTY", 0.02)
@@ -194,6 +196,10 @@ def decide_postflop(req, brain, mode, x, params, rng):
     need = to_call / float(pot + to_call)
     big_call = to_call > 0.4 * max(1, req.get("my_stack", 200))
     margin = params.get("BIG_CALL_MARGIN", 0.07) if big_call else params.get("CALL_MARGIN", 0.04)
+    if CFG.get("SM_ON", False) and CFG.get("SM_CALLX", True) and street >= 3:
+        margin += CFG["SM_CALL_EXTRA"][min(2, street - 3)]
+        if street < 5 and brain.seat != "button":
+            margin += CFG["SM_OOP_EXTRA"]
 
     if can_raise and e_r >= params.get("RAISE_VALUE", 0.78):
         b = brain._bet(req, CFG["BET_BIG"], e_r)
